@@ -43,6 +43,15 @@ const LEVELS = [
   { id:5, rows:21, label:'Master',      emoji:'💀', target:17, timeLimit:60,  distrChance:0.7 },
 ];
 
+const LEVEL_COLORS = [
+  { accent:'#C87941', bar:'#C87941' },
+  { accent:'#B8682E', bar:'#B8682E' },
+  { accent:'#A85820', bar:'#A85820' },
+  { accent:'#984818', bar:'#984818' },
+  { accent:'#883810', bar:'#883810' },
+];
+const DIFF_TAGS = ['EASY','CASUAL','MEDIUM','HARD','EXTREME'];
+
 // ── Tiny inline sounds (base64 Web Audio via Expo AV) ─────────────────────────
 // We generate sounds programmatically using Audio
 async function playTone(freq, duration, type = 'sine', volume = 0.3) {
@@ -393,52 +402,138 @@ function ScorePopup({ score, color, onDone }) {
 
 // ── Menu ──────────────────────────────────────────────────────────────────────
 function MenuScreen({ onStart, unlockedLevels, highScores }) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
+      Animated.spring(slideAnim, { toValue: 0, tension: 60, friction: 10, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
   return (
-    <LinearGradient colors={['#1A0A04','#2C1508','#3D2010']} style={S.root}>
+    <LinearGradient colors={['#0D0602','#180C05','#221208','#1A0D06']} style={S.root}>
       <SafeAreaView style={S.safe}>
-        <ScrollView contentContainerStyle={S.menuScroll}>
-          <View style={S.logoBox}>
+        <ScrollView contentContainerStyle={S.menuScroll} showsVerticalScrollIndicator={false}>
+
+          {/* Hero Logo */}
+          <Animated.View style={[S.heroBox, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+            <View style={S.logoRing}>
+              <Text style={S.logoIcon}>🪵</Text>
+            </View>
             <Text style={S.logo}>JENGA</Text>
-            <View style={S.logoLine} />
-            <Text style={S.logoSub}>DRAG TO PULL · DON'T LET IT FALL</Text>
-    <Text style={S.logoSub}>game by Claude prompted by skarabhaa</Text>
+            <View style={S.logoDivRow}>
+              <View style={S.logoDivLine} />
+              <Text style={S.logoDivDot}>◆</Text>
+              <View style={S.logoDivLine} />
+            </View>
+            <Text style={S.logoTagline}>DRAG · PULL · SURVIVE</Text>
+          </Animated.View>
+
+          {/* How to play */}
+          <Animated.View style={[S.howToBox, { opacity: fadeAnim }]}>
+            <View style={S.howToHeader}>
+              <View style={S.howToLine} />
+              <Text style={S.howToTitle}>HOW TO PLAY</Text>
+              <View style={S.howToLine} />
+            </View>
+            {[
+              { icon:'👈', text:'Swipe a block left or right to pull it' },
+              { icon:'⚡', text:'Must drag past 65% — short swipe snaps back' },
+              { icon:'🎯', text:'Center blocks are safe · Edge blocks are risky' },
+              { icon:'☠️', text:'Last 2 in a row? Pulling the middle = collapse!' },
+            ].map((item, i) => (
+              <View key={i} style={S.howToRow}>
+                <Text style={S.howToIcon}>{item.icon}</Text>
+                <Text style={S.howToText}>{item.text}</Text>
+              </View>
+            ))}
+          </Animated.View>
+
+          {/* Section label */}
+          <View style={S.sectionHeader}>
+            <View style={S.sectionLine} />
+            <Text style={S.sectionLabel}>SELECT LEVEL</Text>
+            <View style={S.sectionLine} />
           </View>
 
-          {/* Instructions */}
-          <View style={S.instructions}>
-            <Text style={S.instrTitle}>HOW TO PLAY</Text>
-            <Text style={S.instrLine}>← Swipe block left or right to pull it out</Text>
-            <Text style={S.instrLine}>⚡ Short swipe = snaps back, must go past 65%</Text>
-            <Text style={S.instrLine}>🏗️ Center blocks = safe · Edge blocks = risky</Text>
-            <Text style={S.instrLine}>🧱 Last 2 in a row — pulling middle = collapse!</Text>
-          </View>
-
+          {/* Level Cards */}
           {LEVELS.map((lvl, i) => {
             const locked = !unlockedLevels.includes(i);
             const hs = highScores[i] || 0;
+            const accent = LEVEL_COLORS[i].accent;
             return (
-              <TouchableOpacity key={lvl.id}
-                style={[S.lvlBtn, locked && { opacity: 0.3 }]}
-                disabled={locked} onPress={() => onStart(i)} activeOpacity={0.75}
+              <TouchableOpacity
+                key={lvl.id}
+                style={[S.lvlCard, locked && S.lvlCardLocked]}
+                disabled={locked}
+                onPress={() => onStart(i)}
+                activeOpacity={0.82}
               >
-                <View style={[S.lvlAccent, { backgroundColor: WOOD[i % WOOD.length].front }]} />
-                <Text style={S.lvlEmoji}>{lvl.emoji}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={S.lvlNum}>LEVEL {lvl.id}  {lvl.timeLimit > 0 ? `⏱${lvl.timeLimit}s` : 'NO TIMER'}</Text>
-                  <Text style={S.lvlName}>{lvl.label}</Text>
-                  {lvl.distrChance > 0 && <Text style={S.lvlDistr}>💥 Distractions active</Text>}
-                </View>
-                <View style={{ alignItems: 'flex-end', marginRight: 12 }}>
-                  {locked ? <Text style={{ fontSize: 20 }}>🔒</Text> : (
-                    <>
-                      <Text style={S.lvlRows}>{lvl.rows} rows</Text>
-                      {hs > 0 && <Text style={S.highScore}>🏆 {hs}</Text>}
-                    </>
+                {/* Left accent stripe */}
+                <View style={[S.lvlStripe, { backgroundColor: locked ? '#2A1A0A' : accent }]} />
+
+                {/* Emoji + info */}
+                <View style={S.lvlBody}>
+                  <View style={S.lvlTopRow}>
+                    <Text style={S.lvlEmoji}>{locked ? '🔒' : lvl.emoji}</Text>
+                    <View style={S.lvlMeta}>
+                      <View style={S.lvlBadgeRow}>
+                        <View style={[S.diffBadge, { backgroundColor: locked ? '#1C0E06' : accent + '22', borderColor: locked ? '#2A1A0A' : accent + '55' }]}>
+                          <Text style={[S.diffBadgeText, { color: locked ? '#3A2010' : accent }]}>{DIFF_TAGS[i]}</Text>
+                        </View>
+                        {lvl.timeLimit > 0 && !locked && (
+                          <View style={S.timerBadge}>
+                            <Text style={S.timerBadgeText}>⏱ {lvl.timeLimit}s</Text>
+                          </View>
+                        )}
+                        {lvl.distrChance > 0 && !locked && (
+                          <View style={S.distrBadge}>
+                            <Text style={S.distrBadgeText}>💥 CHAOS</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[S.lvlName, { color: locked ? '#3A2010' : '#E0A060' }]}>{lvl.label}</Text>
+                      <Text style={[S.lvlSubInfo, { color: locked ? '#2A1408' : '#6A4828' }]}>{lvl.rows} rows · pull {lvl.target} blocks</Text>
+                    </View>
+                  </View>
+                  {!locked && hs > 0 && (
+                    <View style={S.hsRow}>
+                      <Text style={S.hsTrophy}>🏆</Text>
+                      <Text style={S.hsVal}>{hs.toLocaleString()}</Text>
+                    </View>
                   )}
                 </View>
+
+                {/* Arrow */}
+                {!locked && (
+                  <View style={S.lvlArrow}>
+                    <Text style={[S.lvlArrowText, { color: accent }]}>›</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             );
           })}
+
+          {/* Credits */}
+          <View style={S.creditsBox}>
+            <View style={S.creditsDivRow}>
+              <View style={S.creditsDivLine} />
+              <Text style={S.creditsDivDot}>◆</Text>
+              <View style={S.creditsDivLine} />
+            </View>
+            <Text style={S.creditsTitle}>CREDITS</Text>
+            <Text style={S.creditsLine}>
+              <Text style={S.creditsLabel}>🎮 Game Dev  </Text>
+              <Text style={S.creditsName}>Claude</Text>
+            </Text>
+            <Text style={S.creditsLine}>
+              <Text style={S.creditsLabel}>🧠 Prompt Engineer  </Text>
+              <Text style={S.creditsName}>Skarabhaa</Text>
+            </Text>
+          </View>
+
         </ScrollView>
       </SafeAreaView>
     </LinearGradient>
@@ -454,92 +549,108 @@ function GameScreen({
   onPullBlock, onMenu, onPopupDone,
 }) {
   const lvl = LEVELS[levelIdx];
-  const stabColor = stability > 60 ? '#5DBB63' : stability > 30 ? '#F5C518' : '#E84040';
+  const lc = LEVEL_COLORS[levelIdx];
+  const stabColor = stability > 60 ? '#6DBF6A' : stability > 30 ? '#F5C842' : '#EF5350';
+  const stabBgColor = stability > 60 ? 'rgba(109,191,106,0.1)' : stability > 30 ? 'rgba(245,200,66,0.1)' : 'rgba(239,83,80,0.1)';
   const isTimedLevel = lvl.timeLimit > 0;
   const timeWarning = isTimedLevel && timeLeft <= 15;
+  const progress = Math.min(removedCount / lvl.target, 1);
 
   return (
-    <LinearGradient colors={['#0A0401','#160802','#221005']} style={S.root}>
+    <LinearGradient colors={['#080401','#100702','#180C03','#1E0F04']} style={S.root}>
       <SafeAreaView style={S.safe}>
-        {/* Header */}
+
+        {/* ── Top HUD ── */}
         <View style={S.hdr}>
-          <TouchableOpacity onPress={onMenu} style={S.back}>
-            <Text style={S.backTxt}>← MENU</Text>
+          <TouchableOpacity onPress={onMenu} style={S.backBtn} activeOpacity={0.7}>
+            <Text style={S.backArrow}>‹</Text>
+            <Text style={S.backTxt}>MENU</Text>
           </TouchableOpacity>
-          <View style={{ alignItems: 'center' }}>
-            <Text style={S.hdrSub}>{lvl.emoji} LEVEL {lvl.id}</Text>
+          <View style={S.hdrCenter}>
+            <Text style={S.hdrEmoji}>{lvl.emoji}</Text>
             <Text style={S.hdrName}>{lvl.label.toUpperCase()}</Text>
           </View>
-          <View style={S.scoreWrap}>
-            <Text style={S.scoreN}>{score}</Text>
-            <Text style={S.scoreL}>pts</Text>
+          <View style={S.scorePill}>
+            <Text style={S.scoreN}>{score.toLocaleString()}</Text>
+            <Text style={S.scoreL}>PTS</Text>
           </View>
         </View>
 
-        {/* Sub-header */}
-        <View style={S.subHdr}>
-          {combo > 1 && (
-            <View style={S.comboBadge}>
-              <Text style={S.comboTxt}>🔥 ×{combo} COMBO</Text>
-            </View>
-          )}
-          <View style={{ flex: 1 }} />
-          {isTimedLevel && (
-            <View style={[S.timerBox, timeWarning && S.timerWarn]}>
-              <Text style={[S.timerTxt, timeWarning && { color: '#FF3030' }]}>⏱ {timeLeft}s</Text>
-            </View>
-          )}
-          <View style={S.pullsBox}>
-            <Text style={S.pullsTxt}>{removedCount} / {lvl.target}</Text>
+        {/* ── Metrics Row ── */}
+        <View style={S.metricsRow}>
+          <View style={S.metricSlot}>
+            {combo > 1 ? (
+              <View style={S.comboBadge}>
+                <Text style={S.comboTxt}>🔥 ×{combo}</Text>
+              </View>
+            ) : (
+              <View style={S.comboBadgeDim}><Text style={S.comboDimTxt}>×1</Text></View>
+            )}
+          </View>
+          <View style={S.progressTrack}>
+            <View style={[S.progressFill, { width:`${progress * 100}%`, backgroundColor:lc.bar }]} />
+            <Text style={S.progressTxt}>{removedCount}/{lvl.target}</Text>
+          </View>
+          <View style={S.metricSlot}>
+            {isTimedLevel ? (
+              <View style={[S.timerPill, timeWarning && S.timerPillWarn]}>
+                <Text style={[S.timerTxt, timeWarning && {color:'#FF5252'}]}>⏱ {timeLeft}s</Text>
+              </View>
+            ) : (
+              <View style={S.timerPillDim}><Text style={S.timerDimTxt}>∞</Text></View>
+            )}
           </View>
         </View>
 
-        {/* Hint */}
+        {/* ── Hint ── */}
         <View style={S.hintWrap}>
-          <Text style={S.hintTxt}>
-            {selected ? '← Swipe left or right to pull →' : '👆 Touch & drag a block sideways'}
-          </Text>
+          <View style={S.hintPill}>
+            <Text style={S.hintTxt}>
+              {selected ? '‹ Swipe left or right to pull ›' : '☛  Touch a block and drag sideways'}
+            </Text>
+          </View>
         </View>
 
-        {/* Tower */}
-        <View style={{ flex: 1, overflow: 'hidden' }}>
+        {/* ── Tower Area ── */}
+        <View style={{ flex:1, overflow:'hidden' }}>
           <ScrollView contentContainerStyle={S.towerArea} showsVerticalScrollIndicator={false}>
             <TowerView
-              tower={tower}
-              selected={selected}
-              setSelected={setSelected}
-              onPullBlock={onPullBlock}
-              tiltAnim={tiltAnim}
-              shakeAnim={shakeAnim}
+              tower={tower} selected={selected} setSelected={setSelected}
+              onPullBlock={onPullBlock} tiltAnim={tiltAnim} shakeAnim={shakeAnim}
               levelIdx={levelIdx}
             />
           </ScrollView>
-
-          {/* Score popups */}
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             {scorePopups.map(p => (
-              <View key={p.id} style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]}>
+              <View key={p.id} style={[StyleSheet.absoluteFill, {justifyContent:'center', alignItems:'center'}]}>
                 <ScorePopup score={p.score} color={p.color} onDone={() => onPopupDone(p.id)} />
               </View>
             ))}
           </View>
-
-          {/* Distraction */}
-          <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]} pointerEvents="none">
+          <View style={[StyleSheet.absoluteFill, {justifyContent:'center', alignItems:'center'}]} pointerEvents="none">
             <DistractionBanner distraction={distraction} />
           </View>
         </View>
 
-        {/* Stability */}
-        <View style={S.stabWrap}>
+        {/* ── Stability Bar ── */}
+        <View style={[S.stabWrap, { backgroundColor:stabBgColor }]}>
           <View style={S.stabTop}>
             <Text style={S.stabLbl}>STRUCTURAL INTEGRITY</Text>
-            <Text style={[S.stabPct, { color: stabColor }]}>{Math.round(stability)}%</Text>
+            <Text style={[S.stabPct, { color:stabColor }]}>{Math.round(stability)}%</Text>
           </View>
-          <View style={S.stabBar}>
-            <Animated.View style={[S.stabFill, { width: `${stability}%`, backgroundColor: stabColor }]} />
+          <View style={S.stabTrack}>
+            {[...Array(20)].map((_,i) => (
+              <View key={i} style={[
+                S.stabSeg,
+                { backgroundColor: (i/20) < (stability/100) ? stabColor : 'rgba(255,255,255,0.06)' },
+              ]} />
+            ))}
           </View>
-          {stability < 30 && <Text style={S.danger}>⚠️  CRITICAL — ONE WRONG MOVE</Text>}
+          {stability < 30 && (
+            <View style={S.dangerBanner}>
+              <Text style={S.dangerTxt}>⚠  CRITICAL — ONE WRONG MOVE</Text>
+            </View>
+          )}
         </View>
       </SafeAreaView>
     </LinearGradient>
@@ -549,38 +660,73 @@ function GameScreen({
 // ── Result ────────────────────────────────────────────────────────────────────
 function ResultScreen({ won, levelIdx, removedCount, score, highScore, isNewHigh, onReplay, onNext, onMenu }) {
   const anim = useRef(new Animated.Value(0)).current;
+  const iconAnim = useRef(new Animated.Value(0.3)).current;
   useEffect(() => {
-    Animated.spring(anim, { toValue: 1, tension: 55, friction: 6, useNativeDriver: true }).start();
+    Animated.parallel([
+      Animated.spring(anim, { toValue:1, tension:55, friction:7, useNativeDriver:true }),
+      Animated.spring(iconAnim, { toValue:1, tension:40, friction:5, delay:150, useNativeDriver:true }),
+    ]).start();
   }, []);
+  const lc = LEVEL_COLORS[Math.min(levelIdx, LEVEL_COLORS.length - 1)];
   return (
-    <LinearGradient colors={won ? ['#041A0D','#0A3018','#105022'] : ['#1A0404','#300A0A','#501010']} style={S.root}>
+    <LinearGradient
+      colors={won ? ['#050F06','#091A0B','#0E2810','#132E14'] : ['#0F0404','#1C0707','#280B0B','#301010']}
+      style={S.root}
+    >
       <SafeAreaView style={S.safe}>
-        <Animated.View style={[S.resWrap, { transform:[{scale:anim}], opacity:anim }]}>
-          <Text style={S.resIcon}>{won ? '🏆' : '💥'}</Text>
-          <Text style={[S.resTitle, { color: won ? '#5DBB63' : '#E84040' }]}>
+        <Animated.View style={[S.resWrap, {
+          opacity: anim,
+          transform:[{ scale: anim.interpolate({ inputRange:[0,1], outputRange:[0.88,1] }) }],
+        }]}>
+          <Animated.View style={[S.resIconWrap, { transform:[{scale:iconAnim}] }]}>
+            <View style={[S.resIconRing, { borderColor: won ? '#4CAF5055' : '#EF535055' }]}>
+              <Text style={S.resIcon}>{won ? '🏆' : '💥'}</Text>
+            </View>
+          </Animated.View>
+          <Text style={[S.resTitle, { color: won ? '#6DBF6A' : '#EF5350' }]}>
             {won ? 'TOWER SURVIVED!' : 'TOWER FELL!'}
           </Text>
-          <View style={S.scoreCard}>
-            <View style={S.scoreRow}><Text style={S.sk}>Blocks Removed</Text><Text style={S.sv}>{removedCount}</Text></View>
-            <View style={S.scoreRow}><Text style={S.sk}>Score</Text><Text style={[S.sv,{color:'#FFD700'}]}>{score}</Text></View>
-            {isNewHigh
-              ? <View style={[S.scoreRow,{backgroundColor:'rgba(255,215,0,0.1)',borderRadius:8,padding:6}]}>
-                  <Text style={[S.sk,{color:'#FFD700'}]}>🌟 NEW BEST!</Text>
-                  <Text style={[S.sv,{color:'#FFD700'}]}>{score}</Text>
+          <Text style={[S.resSubtitle, { color: won ? '#3A8C38' : '#8C2020' }]}>
+            {won ? `Level ${levelIdx + 1} Complete` : 'Better luck next time'}
+          </Text>
+          <View style={[S.scoreCard, { borderColor: won ? '#1E5C1E' : '#5C1E1E' }]}>
+            <View style={S.scoreCardRow}>
+              <Text style={S.sk}>Blocks Removed</Text>
+              <Text style={S.sv}>{removedCount}</Text>
+            </View>
+            <View style={S.scoreCardDivider} />
+            <View style={S.scoreCardRow}>
+              <Text style={S.sk}>Score</Text>
+              <Text style={[S.sv, { color:'#FFD700', fontSize:20 }]}>{score.toLocaleString()}</Text>
+            </View>
+            {isNewHigh ? (
+              <>
+                <View style={S.scoreCardDivider} />
+                <View style={[S.scoreCardRow, S.newHighRow]}>
+                  <Text style={S.newHighLabel}>🌟 NEW PERSONAL BEST</Text>
+                  <Text style={S.newHighVal}>{score.toLocaleString()}</Text>
                 </View>
-              : highScore > 0 && <View style={S.scoreRow}><Text style={S.sk}>Best</Text><Text style={S.sv}>{highScore}</Text></View>
-            }
+              </>
+            ) : highScore > 0 && (
+              <>
+                <View style={S.scoreCardDivider} />
+                <View style={S.scoreCardRow}>
+                  <Text style={S.sk}>Personal Best</Text>
+                  <Text style={S.sv}>{highScore.toLocaleString()}</Text>
+                </View>
+              </>
+            )}
           </View>
-          <TouchableOpacity style={[S.resBtn,{backgroundColor:'#5C3317'}]} onPress={onReplay} activeOpacity={0.8}>
+          <TouchableOpacity style={[S.resBtn, S.resBtnPrimary]} onPress={onReplay} activeOpacity={0.8}>
             <Text style={S.rbt}>🔄  PLAY AGAIN</Text>
           </TouchableOpacity>
           {won && levelIdx + 1 < LEVELS.length && (
-            <TouchableOpacity style={[S.resBtn,{backgroundColor:'#1A5C2A'}]} onPress={onNext} activeOpacity={0.8}>
-              <Text style={S.rbt}>➡️  NEXT LEVEL</Text>
+            <TouchableOpacity style={[S.resBtn, S.resBtnNext]} onPress={onNext} activeOpacity={0.8}>
+              <Text style={S.rbt}>NEXT LEVEL  ›</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity style={[S.resBtn,{backgroundColor:'#111'}]} onPress={onMenu} activeOpacity={0.8}>
-            <Text style={S.rbt}>🏠  MAIN MENU</Text>
+          <TouchableOpacity style={[S.resBtn, S.resBtnMenu]} onPress={onMenu} activeOpacity={0.8}>
+            <Text style={[S.rbt, { color:'#6B4020' }]}>MAIN MENU</Text>
           </TouchableOpacity>
         </Animated.View>
       </SafeAreaView>
@@ -873,60 +1019,326 @@ export default function App() {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const S = StyleSheet.create({
-  root:{flex:1}, safe:{flex:1},
-  menuScroll:{alignItems:'center',padding:20,paddingTop:36},
-  logoBox:{alignItems:'center',marginBottom:16},
-  logo:{fontSize:52,fontWeight:'900',color:'#D4924F',letterSpacing:14},
-  logoLine:{width:200,height:2,backgroundColor:'#6B3D22',marginVertical:8},
-  logoSub:{fontSize:11,color:'#8B6040',letterSpacing:4},
-  instructions:{width:'100%',backgroundColor:'rgba(61,32,16,0.7)',borderRadius:12,padding:14,marginBottom:20,gap:5,borderWidth:1,borderColor:'rgba(139,94,60,0.3)'},
-  instrTitle:{color:'#D4924F',fontWeight:'900',fontSize:11,letterSpacing:3,marginBottom:4},
-  instrLine:{color:'#9A7050',fontSize:12,lineHeight:20},
-  lvlBtn:{flexDirection:'row',alignItems:'center',width:'100%',backgroundColor:'#2A1408',borderRadius:12,marginBottom:10,borderWidth:1,borderColor:'#5C3010',overflow:'hidden',elevation:5},
-  lvlAccent:{width:5,alignSelf:'stretch'},
-  lvlEmoji:{fontSize:24,marginHorizontal:14},
-  lvlNum:{color:'#8B6040',fontSize:10,fontWeight:'800',letterSpacing:2},
-  lvlName:{color:'#D4924F',fontSize:16,fontWeight:'700',marginTop:2},
-  lvlDistr:{color:'#FF6B35',fontSize:10,marginTop:2},
-  lvlRows:{color:'#6B4020',fontSize:12},
-  highScore:{color:'#FFD700',fontSize:11,fontWeight:'700'},
-  hdr:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:16,paddingVertical:10,borderBottomWidth:1,borderBottomColor:'rgba(100,60,20,0.4)'},
-  back:{padding:4},
-  backTxt:{color:'#7A5030',fontWeight:'800',fontSize:12,letterSpacing:1},
-  hdrSub:{color:'#7A5030',fontSize:10,letterSpacing:2},
-  hdrName:{color:'#D4924F',fontWeight:'800',fontSize:13},
-  scoreWrap:{alignItems:'center',minWidth:50},
-  scoreN:{color:'#FFD700',fontSize:22,fontWeight:'900'},
-  scoreL:{color:'#7A5030',fontSize:9,letterSpacing:1},
-  subHdr:{flexDirection:'row',alignItems:'center',paddingHorizontal:12,paddingVertical:5,gap:8},
-  comboBadge:{backgroundColor:'rgba(255,107,53,0.2)',borderRadius:20,paddingHorizontal:10,paddingVertical:3,borderWidth:1,borderColor:'rgba(255,107,53,0.4)'},
-  comboTxt:{color:'#FF6B35',fontSize:12,fontWeight:'900'},
-  timerBox:{backgroundColor:'rgba(80,50,20,0.6)',borderRadius:8,paddingHorizontal:10,paddingVertical:3},
-  timerWarn:{backgroundColor:'rgba(100,10,10,0.8)',borderWidth:1,borderColor:'#FF3030'},
-  timerTxt:{color:'#D4924F',fontSize:13,fontWeight:'800'},
-  pullsBox:{backgroundColor:'rgba(40,20,8,0.8)',borderRadius:8,paddingHorizontal:10,paddingVertical:3},
-  pullsTxt:{color:'#7A5030',fontSize:12},
-  hintWrap:{alignItems:'center',paddingVertical:5},
-  hintTxt:{color:'#9A7050',fontSize:12,backgroundColor:'rgba(40,20,8,0.9)',paddingHorizontal:14,paddingVertical:5,borderRadius:20,overflow:'hidden'},
-  towerArea:{flexGrow:1,alignItems:'center',justifyContent:'flex-end',paddingVertical:8},
-  scorePopup:{fontSize:26,fontWeight:'900',textShadowColor:'rgba(0,0,0,0.9)',textShadowOffset:{width:1,height:1},textShadowRadius:6},
-  distrBanner:{backgroundColor:'rgba(10,4,0,0.97)',borderRadius:16,padding:20,borderWidth:2,borderColor:'#FF6B35',alignItems:'center',minWidth:260,maxWidth:300},
-  distrTitle:{color:'#FF6B35',fontSize:20,fontWeight:'900',marginBottom:4},
-  distrDesc:{color:'#C8844A',fontSize:13,textAlign:'center'},
-  stabWrap:{paddingHorizontal:20,paddingBottom:18,paddingTop:6},
-  stabTop:{flexDirection:'row',justifyContent:'space-between',marginBottom:5},
-  stabLbl:{color:'#7A5030',fontSize:10,fontWeight:'800',letterSpacing:2},
-  stabPct:{fontSize:11,fontWeight:'900'},
-  stabBar:{width:'100%',height:8,backgroundColor:'rgba(100,60,20,0.3)',borderRadius:99,overflow:'hidden'},
-  stabFill:{height:'100%',borderRadius:99},
-  danger:{color:'#E84040',fontSize:11,fontWeight:'700',textAlign:'center',marginTop:5,letterSpacing:1},
-  resWrap:{flex:1,alignItems:'center',justifyContent:'center',padding:28},
-  resIcon:{fontSize:72,marginBottom:16},
-  resTitle:{fontSize:26,fontWeight:'900',letterSpacing:3,marginBottom:6},
-  scoreCard:{width:'100%',backgroundColor:'rgba(255,255,255,0.06)',borderRadius:14,padding:16,marginBottom:24,gap:10},
-  scoreRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center'},
-  sk:{color:'#888',fontSize:13},
-  sv:{color:'#ccc',fontSize:16,fontWeight:'800'},
-  resBtn:{width:'100%',padding:17,borderRadius:12,alignItems:'center',marginBottom:10,elevation:4},
-  rbt:{color:'#fff',fontSize:15,fontWeight:'800',letterSpacing:2},
+  // ── Shared
+  root:{ flex:1 },
+  safe:{ flex:1 },
+
+  // ── Menu scroll
+  menuScroll:{
+    alignItems:'center', paddingHorizontal:20,
+    paddingTop:28, paddingBottom:28,
+  },
+
+  // ── Hero logo block
+  heroBox:{ alignItems:'center', marginBottom:28, width:'100%' },
+  logoRing:{
+    width:72, height:72, borderRadius:36,
+    backgroundColor:'rgba(180,100,30,0.10)',
+    borderWidth:1, borderColor:'rgba(200,130,50,0.28)',
+    alignItems:'center', justifyContent:'center', marginBottom:14,
+  },
+  logoIcon:{ fontSize:32 },
+  logo:{
+    fontSize:52, fontWeight:'900', color:'#D9914A',
+    letterSpacing:16, marginBottom:10,
+    textShadowColor:'rgba(200,100,20,0.35)',
+    textShadowOffset:{ width:0, height:3 },
+    textShadowRadius:12,
+  },
+  logoDivRow:{ flexDirection:'row', alignItems:'center', gap:10, marginBottom:10, width:160 },
+  logoDivLine:{ flex:1, height:1, backgroundColor:'#3E2010' },
+  logoDivDot:{ color:'#7B4A20', fontSize:7 },
+  logoTagline:{ fontSize:9, color:'#5E3A1A', letterSpacing:4, fontWeight:'700' },
+
+  // ── How to play box
+  howToBox:{
+    width:'100%', borderRadius:16,
+    backgroundColor:'rgba(20,10,4,0.85)',
+    borderWidth:1, borderColor:'rgba(80,45,15,0.30)',
+    padding:16, marginBottom:22,
+  },
+  howToHeader:{ flexDirection:'row', alignItems:'center', gap:10, marginBottom:14 },
+  howToLine:{ flex:1, height:1, backgroundColor:'rgba(80,45,15,0.4)' },
+  howToTitle:{ color:'#7A5030', fontSize:9, fontWeight:'900', letterSpacing:3 },
+  howToRow:{ flexDirection:'row', alignItems:'flex-start', gap:12, marginBottom:9 },
+  howToIcon:{ fontSize:15, width:22, textAlign:'center', marginTop:1 },
+  howToText:{ color:'#7A5A38', fontSize:12, lineHeight:19, flex:1 },
+
+  // ── Section header
+  sectionHeader:{ flexDirection:'row', alignItems:'center', gap:10, width:'100%', marginBottom:14, marginTop:4 },
+  sectionLine:{ flex:1, height:1, backgroundColor:'#2E1608' },
+  sectionLabel:{ color:'#5A3520', fontSize:9, fontWeight:'900', letterSpacing:3 },
+
+  // ── Level card
+  lvlCard:{
+    width:'100%', borderRadius:16,
+    backgroundColor:'rgba(18,9,3,0.98)',
+    borderWidth:1, borderColor:'rgba(70,38,12,0.55)',
+    marginBottom:12, overflow:'hidden', elevation:8,
+    flexDirection:'row', alignItems:'stretch',
+    shadowColor:'#000', shadowOffset:{ width:0, height:4 },
+    shadowOpacity:0.4, shadowRadius:8,
+  },
+  lvlCardLocked:{ opacity:0.3 },
+  lvlStripe:{ width:5 },
+  lvlBody:{ flex:1, padding:14, paddingLeft:14 },
+  lvlTopRow:{ flexDirection:'row', alignItems:'center', gap:12 },
+  lvlEmoji:{ fontSize:26 },
+  lvlMeta:{ flex:1, gap:4 },
+  lvlBadgeRow:{ flexDirection:'row', gap:6, flexWrap:'wrap' },
+  diffBadge:{
+    borderRadius:6, paddingHorizontal:7, paddingVertical:2,
+    borderWidth:1,
+  },
+  diffBadgeText:{ fontSize:9, fontWeight:'900', letterSpacing:1.5 },
+  timerBadge:{
+    backgroundColor:'rgba(100,160,220,0.12)',
+    borderRadius:6, paddingHorizontal:7, paddingVertical:2,
+    borderWidth:1, borderColor:'rgba(100,160,220,0.3)',
+  },
+  timerBadgeText:{ color:'#88AACC', fontSize:9, fontWeight:'800', letterSpacing:0.5 },
+  distrBadge:{
+    backgroundColor:'rgba(239,83,80,0.12)',
+    borderRadius:6, paddingHorizontal:7, paddingVertical:2,
+    borderWidth:1, borderColor:'rgba(239,83,80,0.3)',
+  },
+  distrBadgeText:{ color:'#EF5350', fontSize:9, fontWeight:'800', letterSpacing:0.5 },
+  lvlName:{ fontSize:17, fontWeight:'800', letterSpacing:0.3 },
+  lvlSubInfo:{ fontSize:11, fontWeight:'500', letterSpacing:0.3 },
+  hsRow:{ flexDirection:'row', alignItems:'center', gap:5, marginTop:8, paddingTop:8, borderTopWidth:1, borderTopColor:'rgba(70,38,12,0.4)' },
+  hsTrophy:{ fontSize:11 },
+  hsVal:{ color:'#D4A040', fontSize:12, fontWeight:'800', letterSpacing:0.5 },
+  lvlArrow:{ justifyContent:'center', paddingHorizontal:14 },
+  lvlArrowText:{ fontSize:28, fontWeight:'300' },
+
+  // ── Credits block
+  creditsBox:{ width:'100%', alignItems:'center', paddingVertical:24, marginTop:8 },
+  creditsDivRow:{ flexDirection:'row', alignItems:'center', gap:10, width:140, marginBottom:14 },
+  creditsDivLine:{ flex:1, height:1, backgroundColor:'#2A1408' },
+  creditsDivDot:{ color:'#4A2810', fontSize:7 },
+  creditsTitle:{ color:'#3E2010', fontSize:8, fontWeight:'900', letterSpacing:4, marginBottom:12 },
+  creditsLine:{ marginBottom:4 },
+  creditsLabel:{ color:'#5A3520', fontSize:12 },
+  creditsName:{ color:'#A86C38', fontSize:12, fontWeight:'800' },
+
+  // ── Game HUD header
+  gameHud:{
+    flexDirection:'row', alignItems:'center', justifyContent:'space-between',
+    paddingHorizontal:16, paddingVertical:10,
+    borderBottomWidth:1, borderBottomColor:'rgba(60,30,8,0.6)',
+    backgroundColor:'rgba(6,3,1,0.5)',
+  },
+  hudBack:{ flexDirection:'row', alignItems:'center', gap:2, padding:4 },
+  hudBackIcon:{ color:'#5A3820', fontSize:24, lineHeight:26, marginTop:-2 },
+  hudBackText:{ color:'#5A3820', fontSize:10, fontWeight:'900', letterSpacing:2 },
+  hudCenter:{ alignItems:'center' },
+  hudLevelEmoji:{ fontSize:16, marginBottom:1 },
+  hudLevelName:{ color:'#C47840', fontSize:12, fontWeight:'900', letterSpacing:2.5 },
+  hudScore:{
+    alignItems:'center', minWidth:60,
+    backgroundColor:'rgba(30,15,4,0.9)',
+    borderRadius:12, paddingHorizontal:10, paddingVertical:6,
+    borderWidth:1, borderColor:'rgba(90,50,10,0.5)',
+  },
+  hudScoreNum:{ color:'#FFD040', fontSize:19, fontWeight:'900', letterSpacing:0.5 },
+  hudScoreLbl:{ color:'#4A2E10', fontSize:7, fontWeight:'900', letterSpacing:2.5 },
+
+  // ── Stats row (below HUD)
+  statsRow:{
+    flexDirection:'row', alignItems:'center', paddingHorizontal:14,
+    paddingVertical:8, gap:10,
+    borderBottomWidth:1, borderBottomColor:'rgba(40,20,5,0.5)',
+  },
+  comboBadge:{
+    backgroundColor:'rgba(255,100,40,0.15)', borderRadius:20,
+    paddingHorizontal:10, paddingVertical:4,
+    borderWidth:1, borderColor:'rgba(255,100,40,0.35)',
+    minWidth:60, alignItems:'center',
+  },
+  comboTxt:{ color:'#FF6A30', fontSize:12, fontWeight:'900' },
+  comboBadgeDim:{
+    borderRadius:20, paddingHorizontal:10, paddingVertical:4,
+    borderWidth:1, borderColor:'rgba(60,35,10,0.2)', minWidth:60, alignItems:'center',
+  },
+  comboDimTxt:{ color:'#2E1808', fontSize:12, fontWeight:'700' },
+
+  // Progress pill
+  pullProgress:{ flex:1, alignItems:'center', gap:4 },
+  pullProgressTrack:{
+    width:'100%', height:6,
+    backgroundColor:'rgba(40,20,6,0.9)',
+    borderRadius:3, overflow:'hidden',
+    borderWidth:1, borderColor:'rgba(70,40,10,0.4)',
+  },
+  pullProgressFill:{
+    height:'100%', borderRadius:3,
+    backgroundColor:'#C87A30',
+  },
+  pullProgressLabel:{ color:'#7A5030', fontSize:10, fontWeight:'800', letterSpacing:1 },
+
+  // Timer
+  timerPill:{
+    backgroundColor:'rgba(30,15,4,0.9)', borderRadius:12,
+    paddingHorizontal:10, paddingVertical:5,
+    borderWidth:1, borderColor:'rgba(70,40,10,0.4)',
+    minWidth:60, alignItems:'center',
+  },
+  timerPillDanger:{
+    backgroundColor:'rgba(80,5,5,0.9)',
+    borderColor:'rgba(220,50,50,0.6)',
+  },
+  timerTxt:{ color:'#C4844A', fontSize:12, fontWeight:'900', letterSpacing:0.5 },
+  timerTxtDanger:{ color:'#FF4444' },
+  timerPillDim:{
+    borderRadius:12, paddingHorizontal:10, paddingVertical:5,
+    borderWidth:1, borderColor:'rgba(50,25,6,0.2)', minWidth:60, alignItems:'center',
+  },
+  timerDimTxt:{ color:'#2E1808', fontSize:14, fontWeight:'300' },
+
+  // Hint bar
+  hintRow:{ alignItems:'center', paddingVertical:6 },
+  hintTxt:{
+    color:'#684828', fontSize:11, letterSpacing:0.5,
+    backgroundColor:'rgba(14,7,2,0.8)',
+    paddingHorizontal:16, paddingVertical:5,
+    borderRadius:20, overflow:'hidden',
+    borderWidth:1, borderColor:'rgba(60,35,8,0.25)',
+  },
+
+  // Tower area
+  towerArea:{ flexGrow:1, alignItems:'center', justifyContent:'flex-end', paddingVertical:8 },
+  scorePopup:{
+    fontSize:30, fontWeight:'900',
+    textShadowColor:'rgba(0,0,0,0.95)',
+    textShadowOffset:{ width:0, height:2 },
+    textShadowRadius:10,
+  },
+
+  // Distraction Banner
+  distrBanner:{
+    backgroundColor:'rgba(6,3,0,0.99)', borderRadius:20,
+    padding:22, borderWidth:2, borderColor:'#FF5722',
+    alignItems:'center', minWidth:260, maxWidth:310, elevation:20,
+    shadowColor:'#FF5722', shadowOffset:{ width:0, height:0 },
+    shadowOpacity:0.5, shadowRadius:20,
+  },
+  distrTitle:{ color:'#FF5722', fontSize:20, fontWeight:'900', marginBottom:5 },
+  distrDesc:{ color:'#B06838', fontSize:13, textAlign:'center', lineHeight:19 },
+
+  // Stability bar
+  stabilityWrap:{
+    paddingHorizontal:16, paddingBottom:18, paddingTop:10,
+    borderTopWidth:1, borderTopColor:'rgba(50,25,6,0.5)',
+  },
+  stabilityHeader:{
+    flexDirection:'row', justifyContent:'space-between',
+    alignItems:'center', marginBottom:8,
+  },
+  stabilityLabel:{ color:'#4A2E14', fontSize:9, fontWeight:'900', letterSpacing:2.5 },
+  stabilityPct:{ fontSize:11, fontWeight:'900', letterSpacing:1 },
+  stabilityTrack:{
+    width:'100%', height:8,
+    backgroundColor:'rgba(30,15,4,0.9)',
+    borderRadius:4, overflow:'visible',
+    borderWidth:1, borderColor:'rgba(60,30,8,0.4)',
+    position:'relative',
+  },
+  stabilityFill:{ height:'100%', borderRadius:4, position:'absolute', left:0, top:0, bottom:0 },
+  stabilityTick:{
+    position:'absolute', top:-2, bottom:-2, width:1,
+    backgroundColor:'rgba(0,0,0,0.3)',
+  },
+  dangerText:{
+    color:'#FF4444', fontSize:11, fontWeight:'900',
+    textAlign:'center', marginTop:7, letterSpacing:1.5,
+  },
+
+  // Result screen
+  resWrap:{ flex:1, alignItems:'center', justifyContent:'center', padding:26 },
+  resIconWrap:{ marginBottom:14 },
+  resIconRing:{
+    width:110, height:110, borderRadius:55,
+    borderWidth:2, alignItems:'center', justifyContent:'center',
+    backgroundColor:'rgba(255,255,255,0.03)',
+  },
+  resIcon:{ fontSize:56 },
+  resTitle:{ fontSize:30, fontWeight:'900', letterSpacing:2.5, marginBottom:5 },
+  resSubtitle:{ fontSize:13, fontWeight:'600', letterSpacing:1, marginBottom:26, opacity:0.7 },
+  scoreCard:{
+    width:'100%', backgroundColor:'rgba(255,255,255,0.04)',
+    borderRadius:18, padding:18, marginBottom:26, borderWidth:1,
+  },
+  scoreCardRow:{ flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingVertical:7 },
+  scoreCardDivider:{ height:1, backgroundColor:'rgba(255,255,255,0.06)', marginVertical:2 },
+  newHighRow:{ backgroundColor:'rgba(255,215,0,0.07)', borderRadius:10, paddingHorizontal:10 },
+  newHighLabel:{ color:'#FFD700', fontSize:12, fontWeight:'800', letterSpacing:0.5 },
+  newHighVal:{ color:'#FFD700', fontSize:18, fontWeight:'900' },
+  sk:{ color:'#4A4A4A', fontSize:13 },
+  sv:{ color:'#C8C8C8', fontSize:16, fontWeight:'800' },
+  resBtn:{
+    width:'100%', paddingVertical:17, borderRadius:15,
+    alignItems:'center', marginBottom:10, elevation:4, borderWidth:1,
+  },
+  resBtnPrimary:{ backgroundColor:'#4A2010', borderColor:'#7E3A18' },
+  resBtnNext:{ backgroundColor:'#0C2C12', borderColor:'#1C5C28' },
+  resBtnMenu:{ backgroundColor:'rgba(14,7,2,0.6)', borderColor:'rgba(60,35,10,0.3)' },
+  rbt:{ color:'#E0B880', fontSize:14, fontWeight:'900', letterSpacing:3 },
+
+  // Older style aliases (kept for compatibility)
+  backBtn:{ flexDirection:'row', alignItems:'center', gap:2, padding:4 },
+  backArrow:{ color:'#5A3820', fontSize:22, lineHeight:24, marginTop:-2 },
+  backTxt:{ color:'#5A3820', fontSize:10, fontWeight:'800', letterSpacing:1.5 },
+  hdr:{
+    flexDirection:'row', alignItems:'center', justifyContent:'space-between',
+    paddingHorizontal:14, paddingVertical:10,
+    borderBottomWidth:1, borderBottomColor:'rgba(60,30,8,0.6)',
+  },
+  hdrCenter:{ alignItems:'center' },
+  hdrEmoji:{ fontSize:15, marginBottom:1 },
+  hdrName:{ color:'#C47840', fontSize:12, fontWeight:'900', letterSpacing:2.5 },
+  scorePill:{
+    alignItems:'center', minWidth:56,
+    backgroundColor:'rgba(25,12,3,0.9)',
+    borderRadius:12, paddingHorizontal:10, paddingVertical:5,
+    borderWidth:1, borderColor:'rgba(80,45,10,0.45)',
+  },
+  scoreN:{ color:'#FFD040', fontSize:18, fontWeight:'900', letterSpacing:0.5 },
+  scoreL:{ color:'#4A2E10', fontSize:7, fontWeight:'900', letterSpacing:2.5 },
+  metricsRow:{
+    flexDirection:'row', alignItems:'center', paddingHorizontal:12,
+    paddingVertical:8, gap:8,
+  },
+  metricSlot:{ alignItems:'center' },
+  progressTrack:{
+    flex:1, height:22, backgroundColor:'rgba(30,15,4,0.9)',
+    borderRadius:11, overflow:'hidden', justifyContent:'center',
+    borderWidth:1, borderColor:'rgba(70,40,10,0.35)',
+  },
+  progressFill:{ position:'absolute', left:0, top:0, bottom:0, borderRadius:11, opacity:0.65 },
+  progressTxt:{ textAlign:'center', color:'#906030', fontSize:11, fontWeight:'900', letterSpacing:1, zIndex:1 },
+  timerPillWarn:{ backgroundColor:'rgba(70,0,0,0.8)', borderColor:'rgba(220,60,60,0.6)' },
+  hintWrap:{ alignItems:'center', paddingVertical:5 },
+  hintPill:{
+    backgroundColor:'rgba(12,6,1,0.9)', borderRadius:20,
+    paddingHorizontal:16, paddingVertical:6,
+    borderWidth:1, borderColor:'rgba(60,35,8,0.25)',
+  },
+  stabWrap:{
+    paddingHorizontal:16, paddingBottom:18, paddingTop:10,
+    borderTopWidth:1, borderTopColor:'rgba(50,25,6,0.5)',
+  },
+  stabTop:{ flexDirection:'row', justifyContent:'space-between', marginBottom:8 },
+  stabLbl:{ color:'#4A2E14', fontSize:9, fontWeight:'900', letterSpacing:2.5 },
+  stabPct:{ fontSize:11, fontWeight:'900', letterSpacing:1 },
+  stabTrack:{ flexDirection:'row', gap:3, height:8 },
+  stabSeg:{ flex:1, height:8, borderRadius:4 },
+  dangerBanner:{
+    marginTop:8, backgroundColor:'rgba(70,0,0,0.45)',
+    borderRadius:8, paddingVertical:5,
+    borderWidth:1, borderColor:'rgba(220,60,60,0.4)',
+  },
+  dangerTxt:{
+    color:'#EF5350', fontSize:11, fontWeight:'900',
+    textAlign:'center', letterSpacing:2,
+  },
 });
