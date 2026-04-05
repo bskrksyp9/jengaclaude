@@ -15,24 +15,25 @@ const { width: SW, height: SH } = Dimensions.get('window');
 
 // ── Dimensions ────────────────────────────────────────────────────────────────
 const COLS = 3;
-const TOWER_W = Math.floor(SW * 0.82);
-const BW = Math.floor((TOWER_W - 6) / 3);
-const BH = Math.floor(BW * 0.36);
-const GAP = 2;
+const TOWER_W = Math.floor(SW * 0.88);
+// Real Jenga ratio: blocks sit FLUSH — zero gap so tower looks solid
+const BW = Math.floor((TOWER_W) / 3);
+const BH = Math.floor(BW * 0.38);
+const GAP = 0;
 const ROW_H = BH + GAP;
 
-// Isometric projection offsets
-const ISO_X = BW * 0.18;
-const ISO_Y = BH * 0.55;
+// Isometric projection — deeper angle for strong 3D look
+const ISO_X = Math.floor(BW * 0.22);
+const ISO_Y = Math.floor(BH * 0.62);
 
-// Wood palette
+// ── Wood palette — 6 variants with grain + knot colors ───────────────────────
 const WOOD = [
-  { top:'#E8A85C', side:'#A06828', front:'#C8883C' },
-  { top:'#DCA050', side:'#986020', front:'#BC7830' },
-  { top:'#E4A458', side:'#9C6824', front:'#C48035' },
-  { top:'#D89848', side:'#906018', front:'#B8742C' },
-  { top:'#EAA85E', side:'#A46A28', front:'#CC8840' },
-  { top:'#D49645', side:'#8C5C18', front:'#B47030' },
+  { top:'#E8A45A', side:'#8C5A18', front:'#C0793A', grain1:'#D49040', grain2:'#A86228', knot:'#6B3A12' },
+  { top:'#DDA050', side:'#845215', front:'#B87030', grain1:'#CA8838', grain2:'#9C5A22', knot:'#5E3210' },
+  { top:'#E6A65C', side:'#906020', front:'#C47C3C', grain1:'#D89444', grain2:'#AA642A', knot:'#704015' },
+  { top:'#D89645', side:'#7C4E12', front:'#B06C2C', grain1:'#C48038', grain2:'#965820', knot:'#5A2E0E' },
+  { top:'#ECA85E', side:'#986624', front:'#CA8040', grain1:'#DC9848', grain2:'#B06C2E', knot:'#784218' },
+  { top:'#D49240', side:'#7A4C10', front:'#AC6828', grain1:'#C07C34', grain2:'#925620', knot:'#582C0C' },
 ];
 
 const LEVELS = [
@@ -158,58 +159,187 @@ function getInstabilityScore(block, tower) {
   return 0.35 + (unsupported / (tower.length * 3)) * 0.2;
 }
 
-// ── Isometric Block Renderer ──────────────────────────────────────────────────
-function IsoBlock({ x, y, w, h, wood, isSelected, isRemovable, dimmed }) {
-  const { top: ct, side: cs, front: cf } = WOOD[wood];
-  const ix = ISO_X, iy = ISO_Y;
+// ── Isometric Block Renderer — Rich Wood ─────────────────────────────────────
+// Deterministic pseudo-random from block slot
+function blockRng(slot, n) {
+  const s = Math.sin(slot * 127.1 + n * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
 
-  // Isometric faces
-  const topPts    = `${x},${y} ${x+w},${y} ${x+w+ix},${y-iy} ${x+ix},${y-iy}`;
-  const frontPts  = `${x},${y} ${x+w},${y} ${x+w},${y+h} ${x},${y+h}`;
-  const sidePts   = `${x+w},${y} ${x+w+ix},${y-iy} ${x+w+ix},${y-iy+h} ${x+w},${y+h}`;
+function IsoBlock({ x, y, w, h, wood, isSelected, isRemovable, dimmed, slot }) {
+  const { top: ct, side: cs, front: cf, grain1, grain2, knot: knotCol } = WOOD[wood];
+  const ix = ISO_X, iy = ISO_Y;
+  const sl = slot || 0;
+
+  // ── Slightly warp top corners for uneven wood surface ──
+  const warp = h * 0.09;
+  const w00 = (blockRng(sl,0) - 0.5) * warp;
+  const w10 = (blockRng(sl,1) - 0.5) * warp;
+  const w01 = (blockRng(sl,2) - 0.5) * warp;
+  const w11 = (blockRng(sl,3) - 0.5) * warp;
+
+  // Top face — 4 warped corners
+  const tx0=x,        ty0=y+w00;
+  const tx1=x+w,      ty1=y+w10;
+  const tx2=x+w+ix,   ty2=y-iy+w11;
+  const tx3=x+ix,     ty3=y-iy+w01;
+  const topPts   = `${tx0},${ty0} ${tx1},${ty1} ${tx2},${ty2} ${tx3},${ty3}`;
+
+  // Front face — top edge follows warp
+  const frontPts = `${tx0},${ty0} ${tx1},${ty1} ${x+w},${y+h} ${x},${y+h}`;
+
+  // Side face — top-right follows warp
+  const sidePts  = `${tx1},${ty1} ${tx2},${ty2} ${x+w+ix},${y-iy+h} ${x+w},${y+h}`;
 
   const selColor = '#FFD700';
-  const opacity = dimmed ? 0.45 : 1;
+  const opacity  = dimmed ? 0.38 : 1;
+
+  // ── Grain line count based on width ──
+  const grainCount = Math.max(3, Math.floor(w / 14));
+  const grainLines = Array.from({ length: grainCount }, (_, i) => {
+    const t = (i + 1) / (grainCount + 1);
+    const jitter = (blockRng(sl, 10 + i) - 0.5) * 0.06;
+    const tj = t + jitter;
+    return tj;
+  });
+
+  // ── Knot position (1–2 knots per block) ──
+  const knot1x = x + w * (0.15 + blockRng(sl,20) * 0.7);
+  const knot1y = y + (blockRng(sl,21) - 0.3) * h * 0.6;
+  const knot1r = h * (0.25 + blockRng(sl,22) * 0.2);
+  const hasKnot2 = blockRng(sl,23) > 0.55;
+  const knot2x = x + w * (0.15 + blockRng(sl,24) * 0.7);
+  const knot2y = y + (blockRng(sl,25) - 0.3) * h * 0.6;
+  const knot2r = h * (0.15 + blockRng(sl,26) * 0.15);
+
+  // ── Shadow depth under block ──
+  const shadowOff = 3;
 
   return (
     <G opacity={opacity}>
-      {/* Shadow */}
-      <Polygon
-        points={`${x+3},${y+h+2} ${x+w+3},${y+h+2} ${x+w+ix+3},${y-iy+h+2} ${x+ix+3},${y-iy+h+2}`}
-        fill="rgba(0,0,0,0.2)"
-      />
-      {/* Front face */}
-      <Polygon points={frontPts} fill={cf}
-        stroke={isSelected ? selColor : 'rgba(0,0,0,0.4)'} strokeWidth={isSelected ? 2 : 0.8} />
-      {/* Side face */}
-      <Polygon points={sidePts} fill={cs}
-        stroke={isSelected ? selColor : 'rgba(0,0,0,0.5)'} strokeWidth={isSelected ? 2 : 0.8} />
-      {/* Top face */}
-      <Polygon points={topPts} fill={ct}
-        stroke={isSelected ? selColor : 'rgba(0,0,0,0.25)'} strokeWidth={isSelected ? 2 : 0.6} />
 
-      {/* Wood grain on top */}
-      {[0.25, 0.5, 0.75].map((t, i) => (
-        <Line key={i}
-          x1={x + w*t} y1={y} x2={x + w*t + ix} y2={y - iy}
-          stroke="rgba(0,0,0,0.08)" strokeWidth={0.7} />
+      {/* ── Drop shadow ── */}
+      <Polygon
+        points={`${x+shadowOff},${y+h+shadowOff-1} ${x+w+shadowOff},${y+h+shadowOff-1} ${x+w+ix+shadowOff},${y-iy+h+shadowOff-1} ${x+ix+shadowOff},${y-iy+h+shadowOff-1}`}
+        fill="rgba(0,0,0,0.18)"
+      />
+
+      {/* ── Front face ── */}
+      <Polygon points={frontPts} fill={cf}
+        stroke={isSelected ? selColor : 'rgba(0,0,0,0.55)'} strokeWidth={isSelected ? 2 : 0.5} />
+      {/* Front grain — vertical lines */}
+      {grainLines.map((t, i) => {
+        const lx = x + w * t;
+        const dark = blockRng(sl, 30+i) > 0.5;
+        return (
+          <Line key={`fg${i}`}
+            x1={lx} y1={y+h} x2={lx} y2={y}
+            stroke={dark ? `rgba(0,0,0,0.09)` : `rgba(255,255,255,0.04)`}
+            strokeWidth={0.6 + blockRng(sl,40+i)*0.6}
+          />
+        );
+      })}
+      {/* Front edge highlight */}
+      <Line x1={x} y1={y} x2={x} y2={y+h} stroke="rgba(255,255,255,0.08)" strokeWidth={1.5} />
+      {/* Front bottom edge darker */}
+      <Line x1={x} y1={y+h} x2={x+w} y2={y+h} stroke="rgba(0,0,0,0.3)" strokeWidth={0.8} />
+
+      {/* ── Side face (right) ── */}
+      <Polygon points={sidePts} fill={cs}
+        stroke={isSelected ? selColor : 'rgba(0,0,0,0.6)'} strokeWidth={isSelected ? 2 : 0.5} />
+      {/* Side shading gradient effect via overlay */}
+      <Polygon points={sidePts} fill="rgba(0,0,0,0.12)" />
+      {/* Side grain */}
+      {[0.3, 0.6].map((t, i) => (
+        <Line key={`sg${i}`}
+          x1={x+w+ix*t} y1={y-iy*t}
+          x2={x+w+ix*t} y2={y-iy*t+h}
+          stroke="rgba(0,0,0,0.07)" strokeWidth={0.5}
+        />
       ))}
 
-      {/* Highlight on top */}
+      {/* ── Top face ── */}
+      <Polygon points={topPts} fill={ct}
+        stroke={isSelected ? selColor : 'rgba(0,0,0,0.2)'} strokeWidth={isSelected ? 2 : 0.4} />
+
+      {/* Top grain lines — follow isometric angle */}
+      {grainLines.map((t, i) => {
+        const lx0 = x    + w * t;
+        const ly0 = y    + w00 + (w10 - w00) * t;
+        const lx1 = lx0  + ix;
+        const ly1 = ly0  - iy;
+        const c1  = blockRng(sl, 50+i);
+        return (
+          <Line key={`tg${i}`}
+            x1={lx0} y1={ly0} x2={lx1} y2={ly1}
+            stroke={c1 > 0.5 ? `rgba(0,0,0,0.09)` : `rgba(255,255,255,0.06)`}
+            strokeWidth={0.5 + blockRng(sl,60+i)*0.5}
+          />
+        );
+      })}
+
+      {/* ── Knots on top face ── */}
+      {/* Knot 1 — oval in top-face coordinate space */}
       <Polygon
-        points={`${x+2},${y-2} ${x+w*0.6},${y-2} ${x+w*0.6+ix*0.6},${y-iy*0.6-2} ${x+ix*0.6},${y-iy*0.6-2}`}
-        fill="rgba(255,255,255,0.18)"
+        points={[
+          [knot1x - knot1r*0.7, knot1y + knot1r*0.3],
+          [knot1x,              knot1y - knot1r*0.5],
+          [knot1x + knot1r*0.7, knot1y + knot1r*0.3],
+          [knot1x,              knot1y + knot1r*0.85],
+        ].map(p=>`${p[0]},${p[1]}`).join(' ')}
+        fill={knotCol} opacity={0.55}
+      />
+      <Polygon
+        points={[
+          [knot1x - knot1r*0.35, knot1y],
+          [knot1x,               knot1y - knot1r*0.22],
+          [knot1x + knot1r*0.35, knot1y],
+          [knot1x,               knot1y + knot1r*0.4],
+        ].map(p=>`${p[0]},${p[1]}`).join(' ')}
+        fill="rgba(0,0,0,0.2)" opacity={0.5}
+      />
+      {hasKnot2 && (
+        <Polygon
+          points={[
+            [knot2x - knot2r*0.7, knot2y + knot2r*0.3],
+            [knot2x,              knot2y - knot2r*0.5],
+            [knot2x + knot2r*0.7, knot2y + knot2r*0.3],
+            [knot2x,              knot2y + knot2r*0.85],
+          ].map(p=>`${p[0]},${p[1]}`).join(' ')}
+          fill={knotCol} opacity={0.4}
+        />
+      )}
+
+      {/* ── Top surface highlight (light catches top-left) ── */}
+      <Polygon
+        points={`${tx0+1},${ty0-1} ${tx0+w*0.45},${ty0-1} ${tx0+w*0.45+ix*0.45},${ty0-iy*0.45-1} ${tx0+ix*0.45},${ty0-iy*0.45-1}`}
+        fill="rgba(255,255,255,0.14)"
       />
 
-      {/* Selected glow */}
-      {isSelected && (
-        <Polygon points={topPts} fill="rgba(255,215,0,0.2)" />
+      {/* ── Scratch marks (random thin lines) ── */}
+      {blockRng(sl,70) > 0.4 && (
+        <Line
+          x1={x + w*(0.2+blockRng(sl,71)*0.3)} y1={y-1}
+          x2={x + w*(0.5+blockRng(sl,72)*0.3) + ix*(0.3+blockRng(sl,73)*0.4)}
+          y2={y-iy*(0.3+blockRng(sl,74)*0.4)-1}
+          stroke="rgba(0,0,0,0.07)" strokeWidth={0.5}
+        />
       )}
 
-      {/* Removability hint */}
-      {isRemovable && !isSelected && (
-        <Polygon points={topPts} fill="rgba(255,255,255,0.08)" />
+      {/* ── Selected gold glow ── */}
+      {isSelected && (
+        <>
+          <Polygon points={topPts}   fill="rgba(255,215,0,0.22)" />
+          <Polygon points={frontPts} fill="rgba(255,215,0,0.10)" />
+          <Polygon points={sidePts}  fill="rgba(255,215,0,0.08)" />
+        </>
       )}
+
+      {/* ── Hover hint — subtle top shimmer ── */}
+      {isRemovable && !isSelected && (
+        <Polygon points={topPts} fill="rgba(255,220,140,0.10)" />
+      )}
+
     </G>
   );
 }
@@ -217,19 +347,16 @@ function IsoBlock({ x, y, w, h, wood, isSelected, isRemovable, dimmed }) {
 // ── Tower with drag-to-pull ───────────────────────────────────────────────────
 function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeAnim, levelIdx }) {
   const rows = tower.length;
-  // Extra height for iso projection
-  const svgH = rows * ROW_H + ISO_Y + 60;
-  const svgW = SW - 20;
+  const svgH = rows * ROW_H + ISO_Y + 80;
+  const svgW = SW - 10;
 
-  // Center tower in SVG
-  const towerTotalW = COLS * BW + (COLS - 1) * GAP;
+  // Center tower — blocks are flush (GAP=0) so total width = COLS * BW
+  const towerTotalW = COLS * BW;
   const startX = (svgW - towerTotalW - ISO_X) / 2;
 
-  // Drag state per block
   const dragRef = useRef({ blockId: null, startX: 0, dx: 0, pulling: false });
   const dragAnims = useRef({});
 
-  // Create pan responder for each block touch
   const createPanResponder = useCallback((block) => {
     if (!canRemove(block, tower)) return { panHandlers: {} };
 
@@ -250,8 +377,7 @@ function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeA
         dragRef.current.dx = g.dx;
         const anim = dragAnims.current[block.id];
         if (anim) anim.setValue(g.dx);
-        // Creak when dragged significantly
-        if (Math.abs(g.dx) > 20 && !dragRef.current.pulling) {
+        if (Math.abs(g.dx) > 18 && !dragRef.current.pulling) {
           dragRef.current.pulling = true;
           SoundFX.creak();
         }
@@ -260,13 +386,12 @@ function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeA
       onPanResponderRelease: (_, g) => {
         const { dx } = g;
         const anim = dragAnims.current[block.id];
-        const threshold = BW * 0.65; // must drag 65% of block width
+        const threshold = BW * 0.65;
 
         if (Math.abs(dx) >= threshold) {
-          // Successful pull
           Animated.timing(anim, {
             toValue: dx > 0 ? SW : -SW,
-            duration: 180,
+            duration: 160,
             useNativeDriver: true,
           }).start(() => {
             if (anim) anim.setValue(0);
@@ -274,13 +399,7 @@ function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeA
             onPullBlock(block, dx);
           });
         } else {
-          // Not enough — snap back
-          Animated.spring(anim, {
-            toValue: 0,
-            tension: 120,
-            friction: 8,
-            useNativeDriver: true,
-          }).start();
+          Animated.spring(anim, { toValue: 0, tension: 130, friction: 8, useNativeDriver: true }).start();
           SoundFX.creak();
           setSelected(null);
         }
@@ -289,18 +408,19 @@ function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeA
 
       onPanResponderTerminate: () => {
         const anim = dragAnims.current[block.id];
-        if (anim) {
-          Animated.spring(anim, { toValue: 0, tension: 120, friction: 8, useNativeDriver: true }).start();
-        }
+        if (anim) Animated.spring(anim, { toValue: 0, tension: 130, friction: 8, useNativeDriver: true }).start();
         setSelected(null);
       },
     });
   }, [tower, setSelected, onPullBlock]);
 
-  // Sort blocks bottom to top for correct iso rendering
   const visibleBlocks = tower.flat()
     .filter(b => !b.removed)
     .sort((a, b) => a.row - b.row || a.col - b.col);
+
+  // Floor ellipse position
+  const floorY = svgH - 22;
+  const floorCX = startX + (COLS * BW) / 2 + ISO_X / 2;
 
   return (
     <Animated.View style={{
@@ -313,14 +433,34 @@ function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeA
       alignSelf: 'center',
     }}>
       <Svg width={svgW} height={svgH} style={StyleSheet.absoluteFill} pointerEvents="none">
+
+        {/* ── Floor shadow ellipse ── */}
+        <Polygon
+          points={`${floorCX - BW*1.4},${floorY+4} ${floorCX + BW*1.4 + ISO_X},${floorY+4} ${floorCX + BW*1.4 + ISO_X},${floorY+10} ${floorCX - BW*1.4},${floorY+10}`}
+          fill="rgba(0,0,0,0)"
+        />
+        {/* Soft elliptical ground shadow */}
+        {[0.9,0.7,0.5,0.3].map((s,i)=>(
+          <Polygon key={i}
+            points={`
+              ${floorCX - BW*1.2*s},${floorY+6}
+              ${floorCX + (BW*1.2+ISO_X)*s},${floorY+6}
+              ${floorCX + (BW*1.2+ISO_X)*s},${floorY+6+6*(1-s)}
+              ${floorCX - BW*1.2*s},${floorY+6+6*(1-s)}
+            `}
+            fill={`rgba(0,0,0,${0.06*(1-i*0.2)})`}
+          />
+        ))}
+
+        {/* ── All blocks ── */}
         {visibleBlocks.map(block => {
           const { row, col, wood, ox, oy } = block;
           const isSelected = selected?.id === block.id;
           const removable = canRemove(block, tower);
-          // Alternate row direction for isometric feel
-          const actualCol = row % 2 === 0 ? col : col;
-          const bx = startX + actualCol * (BW + GAP) + ox;
-          const by = svgH - 30 - (row * ROW_H) - BH + oy;
+          // Flush: no gap between blocks
+          const bx = startX + col * BW + ox;
+          const by = svgH - 22 - (row * ROW_H) - BH + oy;
+          const slot = row * COLS + col;
 
           return (
             <IsoBlock
@@ -330,6 +470,7 @@ function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeA
               isSelected={isSelected}
               isRemovable={removable}
               dimmed={selected && selected.id !== block.id && !removable}
+              slot={slot}
             />
           );
         })}
@@ -339,8 +480,8 @@ function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeA
       {visibleBlocks.map(block => {
         const { row, col, ox, oy } = block;
         const removable = canRemove(block, tower);
-        const bx = startX + col * (BW + GAP) + ox;
-        const by = svgH - 30 - (row * ROW_H) - BH + oy;
+        const bx = startX + col * BW + ox;
+        const by = svgH - 22 - (row * ROW_H) - BH + oy;
         const panResponder = removable ? createPanResponder(block) : null;
         const dragAnim = dragAnims.current[block.id] || new Animated.Value(0);
 
