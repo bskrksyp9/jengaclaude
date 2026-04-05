@@ -6,35 +6,41 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { G, Rect, Polygon, Line, Defs,
-  LinearGradient as SvgGrad, Stop } from 'react-native-svg';
+import Svg, { G, Polygon, Line } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { Audio } from 'expo-av';
+import { GLView } from 'expo-gl';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
-// ── Dimensions ────────────────────────────────────────────────────────────────
+// ── 2D menu/UI dimensions (still used for non-tower UI) ──────────────────────
 const COLS = 3;
-const TOWER_W = Math.floor(SW * 0.88);
-// Real Jenga ratio: blocks sit FLUSH — zero gap so tower looks solid
-const BW = Math.floor((TOWER_W) / 3);
-const BH = Math.floor(BW * 0.38);
-const GAP = 0;
-const ROW_H = BH + GAP;
 
-// Isometric projection — deeper angle for strong 3D look
-const ISO_X = Math.floor(BW * 0.22);
-const ISO_Y = Math.floor(BH * 0.62);
+// ── 3D block dimensions — real Jenga ratio 3 : 1 : 0.6 ──────────────────────
+// World units — blocks sit FLUSH, zero gap
+const B3W = 0.75;   // half-width  (long axis)
+const B3D = 0.25;   // half-depth  (short axis = 1/3 of width)
+const B3H = 0.125;  // half-height (0.6/3 of width)
+const B3G = 0.003;  // tiny inter-block gap so edges read clearly
 
-// ── Wood palette — 6 variants with grain + knot colors ───────────────────────
-const WOOD = [
-  { top:'#E8A45A', side:'#8C5A18', front:'#C0793A', grain1:'#D49040', grain2:'#A86228', knot:'#6B3A12' },
-  { top:'#DDA050', side:'#845215', front:'#B87030', grain1:'#CA8838', grain2:'#9C5A22', knot:'#5E3210' },
-  { top:'#E6A65C', side:'#906020', front:'#C47C3C', grain1:'#D89444', grain2:'#AA642A', knot:'#704015' },
-  { top:'#D89645', side:'#7C4E12', front:'#B06C2C', grain1:'#C48038', grain2:'#965820', knot:'#5A2E0E' },
-  { top:'#ECA85E', side:'#986624', front:'#CA8040', grain1:'#DC9848', grain2:'#B06C2E', knot:'#784218' },
-  { top:'#D49240', side:'#7A4C10', front:'#AC6828', grain1:'#C07C34', grain2:'#925620', knot:'#582C0C' },
+// ── Wood palette — 6 variants ─────────────────────────────────────────────────
+// Each has float RGB triplets for top / front / side faces + grain dark/light
+const WOOD3 = [
+  { t:[0.92,0.65,0.35], f:[0.77,0.49,0.23], s:[0.55,0.34,0.11], gd:[0.62,0.40,0.15], gl:[0.98,0.72,0.40] },
+  { t:[0.88,0.62,0.32], f:[0.73,0.46,0.21], s:[0.52,0.31,0.10], gd:[0.58,0.37,0.13], gl:[0.94,0.69,0.37] },
+  { t:[0.94,0.67,0.37], f:[0.79,0.51,0.25], s:[0.57,0.36,0.12], gd:[0.64,0.42,0.16], gl:[1.00,0.74,0.42] },
+  { t:[0.86,0.60,0.30], f:[0.71,0.44,0.19], s:[0.50,0.30,0.09], gd:[0.56,0.35,0.12], gl:[0.92,0.66,0.35] },
+  { t:[0.90,0.64,0.34], f:[0.75,0.48,0.22], s:[0.53,0.33,0.11], gd:[0.60,0.39,0.14], gl:[0.96,0.71,0.39] },
+  { t:[0.84,0.58,0.28], f:[0.69,0.42,0.18], s:[0.48,0.28,0.08], gd:[0.54,0.33,0.11], gl:[0.90,0.64,0.33] },
 ];
+
+// Keep WOOD array for any remaining 2D references
+const WOOD = WOOD3.map(w => ({
+  top: `rgb(${(w.t[0]*255)|0},${(w.t[1]*255)|0},${(w.t[2]*255)|0})`,
+  front: `rgb(${(w.f[0]*255)|0},${(w.f[1]*255)|0},${(w.f[2]*255)|0})`,
+  side: `rgb(${(w.s[0]*255)|0},${(w.s[1]*255)|0},${(w.s[2]*255)|0})`,
+  grain1:'#D49040', grain2:'#A86228', knot:'#6B3A12',
+}));
 
 const LEVELS = [
   { id:1, rows:9,  label:'Beginner',    emoji:'🪵', target:5,  timeLimit:0,   distrChance:0   },
@@ -159,350 +165,464 @@ function getInstabilityScore(block, tower) {
   return 0.35 + (unsupported / (tower.length * 3)) * 0.2;
 }
 
-// ── Isometric Block Renderer — Rich Wood ─────────────────────────────────────
-// Deterministic pseudo-random from block slot
-function blockRng(slot, n) {
-  const s = Math.sin(slot * 127.1 + n * 311.7) * 43758.5453;
-  return s - Math.floor(s);
+// ── 3D Tower — WebGL via expo-gl ─────────────────────────────────────────────
+// Deterministic per-block random
+function brng(slot, n) {
+  const v = Math.sin(slot * 127.1 + n * 311.7) * 43758.5453;
+  return v - Math.floor(v);
 }
 
-function IsoBlock({ x, y, w, h, wood, isSelected, isRemovable, dimmed, slot }) {
-  const { top: ct, side: cs, front: cf, grain1, grain2, knot: knotCol } = WOOD[wood];
-  const ix = ISO_X, iy = ISO_Y;
-  const sl = slot || 0;
+// ── GLSL shaders ─────────────────────────────────────────────────────────────
+const VS = `
+precision highp float;
+attribute vec3 aP;
+attribute vec3 aN;
+attribute vec2 aUV;
+attribute float aFace;
+attribute float aSlot;
+uniform mat4 uVP;
+uniform float uTilt;
+uniform float uShake;
+varying vec2 vUV;
+varying vec3 vN;
+varying float vFace;
+varying float vSlot;
+void main(){
+  float s=sin(uTilt),c=cos(uTilt);
+  vec3 p=aP;
+  float ny=p.y*c-p.z*s;
+  float nz=p.y*s+p.z*c;
+  p=vec3(p.x+uShake,ny,nz);
+  gl_Position=uVP*vec4(p,1.0);
+  vUV=aUV; vN=aN; vFace=aFace; vSlot=aSlot;
+}`;
 
-  // ── Slightly warp top corners for uneven wood surface ──
-  const warp = h * 0.09;
-  const w00 = (blockRng(sl,0) - 0.5) * warp;
-  const w10 = (blockRng(sl,1) - 0.5) * warp;
-  const w01 = (blockRng(sl,2) - 0.5) * warp;
-  const w11 = (blockRng(sl,3) - 0.5) * warp;
+const FS = `
+precision highp float;
+varying vec2 vUV;
+varying vec3 vN;
+varying float vFace;
+varying float vSlot;
+uniform vec3 uL1;
+uniform vec3 uL2;
+uniform float uHovSlot;
+uniform float uSelSlot;
 
-  // Top face — 4 warped corners
-  const tx0=x,        ty0=y+w00;
-  const tx1=x+w,      ty1=y+w10;
-  const tx2=x+w+ix,   ty2=y-iy+w11;
-  const tx3=x+ix,     ty3=y-iy+w01;
-  const topPts   = `${tx0},${ty0} ${tx1},${ty1} ${tx2},${ty2} ${tx3},${ty3}`;
+float h11(float n){return fract(sin(n)*43758.5453);}
+float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float noise(vec2 p){
+  vec2 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+  return mix(mix(h21(i),h21(i+vec2(1,0)),u.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),u.x),u.y);
+}
+float fbm(vec2 p){float v=0.0,a=0.5;for(int i=0;i<4;i++){v+=a*noise(p);p*=2.1;a*=0.5;}return v;}
 
-  // Front face — top edge follows warp
-  const frontPts = `${tx0},${ty0} ${tx1},${ty1} ${x+w},${y+h} ${x},${y+h}`;
+void main(){
+  float seed=vSlot*0.317+3.14;
+  float hue=h11(seed*2.1)*0.10;
 
-  // Side face — top-right follows warp
-  const sidePts  = `${tx1},${ty1} ${tx2},${ty2} ${x+w+ix},${y-iy+h} ${x+w},${y+h}`;
+  // Wood ring pattern
+  vec2 uv=vUV;
+  float warp=fbm(uv*1.2+seed*1.7)*2.0;
+  float dist=length(uv*vec2(1.0,2.5)-vec2(0.5+h11(seed)*0.4,0.5+h11(seed*2.0)*0.4));
+  float rings=sin((dist+warp)*20.0+seed*5.0);
+  rings=smoothstep(-0.15,0.65,rings);
 
-  const selColor = '#FFD700';
-  const opacity  = dimmed ? 0.38 : 1;
+  // Surface bump — uneven wood texture
+  float bump=fbm(uv*7.0+seed*3.7)*0.5+noise(uv*22.0+seed*11.0)*0.18;
 
-  // ── Grain line count based on width ──
-  const grainCount = Math.max(3, Math.floor(w / 14));
-  const grainLines = Array.from({ length: grainCount }, (_, i) => {
-    const t = (i + 1) / (grainCount + 1);
-    const jitter = (blockRng(sl, 10 + i) - 0.5) * 0.06;
-    const tj = t + jitter;
-    return tj;
+  // Knot
+  vec2 kc=vec2(0.2+h11(seed*3.1)*0.6,0.5+h11(seed*4.2)*0.3);
+  float kr=0.06+h11(seed*1.3)*0.05;
+  float kn=smoothstep(kr,kr*0.25,length(uv-kc));
+  float kn2=0.0;
+  if(h11(seed*6.1)>0.5){
+    vec2 kc2=vec2(0.2+h11(seed*8.1)*0.6,0.3+h11(seed*9.2)*0.4);
+    kn2=smoothstep(kr*0.8,kr*0.2,length(uv-kc2))*0.7;
+  }
+  float knots=clamp(kn+kn2,0.0,1.0);
+
+  // Base wood colors per face
+  vec3 light_wood=vec3(0.90+hue,0.63+hue*0.5,0.34);
+  vec3 dark_wood =vec3(0.55+hue*0.5,0.33,0.11);
+  vec3 knot_col  =vec3(0.30+hue*0.3,0.16,0.06);
+
+  vec3 woodCol=mix(dark_wood,light_wood,rings);
+  woodCol=mix(woodCol*0.74,woodCol*1.06,bump);
+  woodCol=mix(woodCol,knot_col,knots*0.82);
+
+  // Scratches
+  float scratch=noise(vec2(uv.x*130.0+seed*20.0,uv.y*1.5))*0.12;
+  woodCol-=scratch*(1.0-rings)*0.35;
+
+  // Face multiplier: top bright, front mid, side dark
+  float fm=vFace<0.5?1.0:(vFace<1.5?0.80:0.60);
+  woodCol*=fm;
+
+  // Edge AO
+  float edgeAO=smoothstep(0.0,0.12,min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y)));
+  float diff1=max(dot(normalize(vN),normalize(uL1)),0.0);
+  float diff2=max(dot(normalize(vN),normalize(uL2)),0.0)*0.25;
+  float lit=0.30+diff1*0.55+diff2;
+  lit*=(0.80+edgeAO*0.20);
+
+  vec3 col=woodCol*lit;
+
+  // Hover / selected
+  float isHov=step(abs(vSlot-uHovSlot),0.5);
+  float isSel=step(abs(vSlot-uSelSlot),0.5);
+  col=mix(col,col+vec3(0.20,0.14,0.02),isHov*(1.0-isSel)*0.9);
+  col=mix(col,mix(col,vec3(1.0,0.84,0.22),0.38),isSel);
+
+  col=clamp(col,0.0,1.0);
+  col=pow(col,vec3(0.90)); // gamma
+  gl_FragColor=vec4(col,1.0);
+}`;
+
+// ── Mat4 helpers ──────────────────────────────────────────────────────────────
+function m4mul(a,b){
+  const r=new Float32Array(16);
+  for(let i=0;i<4;i++)for(let j=0;j<4;j++){
+    let s=0;for(let k=0;k<4;k++)s+=a[i+k*4]*b[k+j*4];r[i+j*4]=s;
+  }return r;
+}
+function m4persp(fov,asp,n,f){
+  const t=1/Math.tan(fov/2),d=f-n;
+  return new Float32Array([t/asp,0,0,0, 0,t,0,0, 0,0,-(f+n)/d,-1, 0,0,-2*f*n/d,0]);
+}
+function m4lookAt(eye,tgt,up){
+  const f=norm3(sub3(tgt,eye)),r=norm3(cross3(f,up)),u=cross3(r,f);
+  return new Float32Array([
+    r[0],u[0],-f[0],0,r[1],u[1],-f[1],0,r[2],u[2],-f[2],0,
+    -dot3(r,eye),-dot3(u,eye),dot3(f,eye),1
+  ]);
+}
+const norm3=v=>{const l=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);return[v[0]/l,v[1]/l,v[2]/l];};
+const dot3=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const cross3=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const sub3=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+
+// ── Build block geometry (6 faces, tight-packed) ──────────────────────────────
+function buildBlockGeom(cx,cy,cz,rotated,slotIdx){
+  const [ex,ez]=rotated?[B3W,B3D]:[B3D,B3W];
+  const w=ex-B3G, d=ez-B3G, h=B3H-B3G;
+  // tiny per-block warp on top surface
+  const wp=B3H*0.08;
+  const w00=(brng(slotIdx,0)-0.5)*wp, w10=(brng(slotIdx,1)-0.5)*wp;
+  const w01=(brng(slotIdx,2)-0.5)*wp, w11=(brng(slotIdx,3)-0.5)*wp;
+
+  const x0=cx-w,x1=cx+w,y0=cy-h,y1=cy+h,z0=cz-d,z1=cz+d;
+
+  // stride: pos(3)+normal(3)+uv(2)+face(1)+slot(1) = 10
+  const verts=[],idxs=[];
+  let base=0;
+  function quad(vs,n,face){
+    const uvs=[[0,0],[1,0],[1,1],[0,1]];
+    for(let i=0;i<4;i++){
+      verts.push(...vs[i],...n,...uvs[i],face,slotIdx);
+    }
+    idxs.push(base,base+1,base+2,base,base+2,base+3);
+    base+=4;
+  }
+  // top (+Y) — warped
+  quad([[x0,y1+w00,z0],[x1,y1+w10,z0],[x1,y1+w11,z1],[x0,y1+w01,z1]],[0,1,0],0);
+  // bottom
+  quad([[x0,y0,z1],[x1,y0,z1],[x1,y0,z0],[x0,y0,z0]],[0,-1,0],0);
+  // front +Z
+  quad([[x0,y0,z1],[x1,y0,z1],[x1,y1+w11,z1],[x0,y1+w01,z1]],[0,0,1],1);
+  // back -Z
+  quad([[x1,y0,z0],[x0,y0,z0],[x0,y1+w00,z0],[x1,y1+w10,z0]],[0,0,-1],1);
+  // right +X
+  quad([[x1,y0,z1],[x1,y0,z0],[x1,y1+w10,z0],[x1,y1+w11,z1]],[1,0,0],2);
+  // left -X
+  quad([[x0,y0,z0],[x0,y0,z1],[x0,y1+w01,z1],[x0,y1+w00,z0]],[-1,0,0],2);
+
+  return{verts,idxs};
+}
+
+// ── Ray-AABB for picking ──────────────────────────────────────────────────────
+function rayAABB(ro,rd,mn,mx){
+  let tmin=-1e9,tmax=1e9;
+  for(let i=0;i<3;i++){
+    const o=ro[i],d=rd[i];
+    if(Math.abs(d)<1e-8){if(o<mn[i]||o>mx[i])return null;continue;}
+    let t0=(mn[i]-o)/d,t1=(mx[i]-o)/d;
+    if(t0>t1)[t0,t1]=[t1,t0];
+    tmin=Math.max(tmin,t0);tmax=Math.min(tmax,t1);
+    if(tmin>tmax)return null;
+  }
+  return tmin>0?tmin:null;
+}
+
+// ── TowerView3D — full WebGL component ───────────────────────────────────────
+function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeAnim, levelIdx }) {
+  const glRef    = useRef(null);
+  const stateRef = useRef({
+    gl:null, prog:null, buf_v:null, buf_i:null,
+    yaw:0.5, targetYaw:0.5,
+    pitch:0.26, targetPitch:0.26,
+    towerTilt:0, shakeVal:0,
+    hovSlot:-1, selSlot:-1,
+    animId:null,
+    // rotate gesture
+    rotActive:false, rotStartX:0, rotStartY:0,
+    rotYaw0:0, rotPitch0:0,
+    // pull gesture
+    pullActive:false, pullBlock:null, pullStartX:0,
   });
 
-  // ── Knot position (1–2 knots per block) ──
-  const knot1x = x + w * (0.15 + blockRng(sl,20) * 0.7);
-  const knot1y = y + (blockRng(sl,21) - 0.3) * h * 0.6;
-  const knot1r = h * (0.25 + blockRng(sl,22) * 0.2);
-  const hasKnot2 = blockRng(sl,23) > 0.55;
-  const knot2x = x + w * (0.15 + blockRng(sl,24) * 0.7);
-  const knot2y = y + (blockRng(sl,25) - 0.3) * h * 0.6;
-  const knot2r = h * (0.15 + blockRng(sl,26) * 0.15);
+  const blocksRef  = useRef(tower);
+  const selectedRef= useRef(selected);
+  const tiltRef    = useRef(0);
+  const shakeRef   = useRef(0);
 
-  // ── Shadow depth under block ──
-  const shadowOff = 3;
+  // Keep refs in sync
+  useEffect(()=>{ blocksRef.current=tower; },[tower]);
+  useEffect(()=>{ selectedRef.current=selected; },[selected]);
 
-  return (
-    <G opacity={opacity}>
+  // Sync Animated tilt/shake into refs for GL loop
+  useEffect(()=>{
+    const tid = tiltAnim.addListener(({value})=>{ tiltRef.current=value*Math.PI/180; });
+    const sid = shakeAnim.addListener(({value})=>{ shakeRef.current=value/SW*0.5; });
+    return()=>{ tiltAnim.removeListener(tid); shakeAnim.removeListener(sid); };
+  },[]);
 
-      {/* ── Drop shadow ── */}
-      <Polygon
-        points={`${x+shadowOff},${y+h+shadowOff-1} ${x+w+shadowOff},${y+h+shadowOff-1} ${x+w+ix+shadowOff},${y-iy+h+shadowOff-1} ${x+ix+shadowOff},${y-iy+h+shadowOff-1}`}
-        fill="rgba(0,0,0,0.18)"
-      />
+  // ── GL init ────────────────────────────────────────────────────────────────
+  const onContextCreate = useCallback((gl)=>{
+    const S = stateRef.current;
+    S.gl = gl;
 
-      {/* ── Front face ── */}
-      <Polygon points={frontPts} fill={cf}
-        stroke={isSelected ? selColor : 'rgba(0,0,0,0.55)'} strokeWidth={isSelected ? 2 : 0.5} />
-      {/* Front grain — vertical lines */}
-      {grainLines.map((t, i) => {
-        const lx = x + w * t;
-        const dark = blockRng(sl, 30+i) > 0.5;
-        return (
-          <Line key={`fg${i}`}
-            x1={lx} y1={y+h} x2={lx} y2={y}
-            stroke={dark ? `rgba(0,0,0,0.09)` : `rgba(255,255,255,0.04)`}
-            strokeWidth={0.6 + blockRng(sl,40+i)*0.6}
-          />
-        );
-      })}
-      {/* Front edge highlight */}
-      <Line x1={x} y1={y} x2={x} y2={y+h} stroke="rgba(255,255,255,0.08)" strokeWidth={1.5} />
-      {/* Front bottom edge darker */}
-      <Line x1={x} y1={y+h} x2={x+w} y2={y+h} stroke="rgba(0,0,0,0.3)" strokeWidth={0.8} />
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
 
-      {/* ── Side face (right) ── */}
-      <Polygon points={sidePts} fill={cs}
-        stroke={isSelected ? selColor : 'rgba(0,0,0,0.6)'} strokeWidth={isSelected ? 2 : 0.5} />
-      {/* Side shading gradient effect via overlay */}
-      <Polygon points={sidePts} fill="rgba(0,0,0,0.12)" />
-      {/* Side grain */}
-      {[0.3, 0.6].map((t, i) => (
-        <Line key={`sg${i}`}
-          x1={x+w+ix*t} y1={y-iy*t}
-          x2={x+w+ix*t} y2={y-iy*t+h}
-          stroke="rgba(0,0,0,0.07)" strokeWidth={0.5}
-        />
-      ))}
+    // Compile shaders
+    function mkS(type,src){
+      const s=gl.createShader(type);
+      gl.shaderSource(s,src); gl.compileShader(s);
+      return s;
+    }
+    const prog=gl.createProgram();
+    gl.attachShader(prog,mkS(gl.VERTEX_SHADER,VS));
+    gl.attachShader(prog,mkS(gl.FRAGMENT_SHADER,FS));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+    S.prog=prog;
 
-      {/* ── Top face ── */}
-      <Polygon points={topPts} fill={ct}
-        stroke={isSelected ? selColor : 'rgba(0,0,0,0.2)'} strokeWidth={isSelected ? 2 : 0.4} />
+    S.buf_v=gl.createBuffer();
+    S.buf_i=gl.createBuffer();
 
-      {/* Top grain lines — follow isometric angle */}
-      {grainLines.map((t, i) => {
-        const lx0 = x    + w * t;
-        const ly0 = y    + w00 + (w10 - w00) * t;
-        const lx1 = lx0  + ix;
-        const ly1 = ly0  - iy;
-        const c1  = blockRng(sl, 50+i);
-        return (
-          <Line key={`tg${i}`}
-            x1={lx0} y1={ly0} x2={lx1} y2={ly1}
-            stroke={c1 > 0.5 ? `rgba(0,0,0,0.09)` : `rgba(255,255,255,0.06)`}
-            strokeWidth={0.5 + blockRng(sl,60+i)*0.5}
-          />
-        );
-      })}
+    // Auto-rotate idle
+    let idleTimer=null;
+    S.autoRot=true;
+    S.stopAutoRot=()=>{ S.autoRot=false; clearTimeout(idleTimer); idleTimer=setTimeout(()=>S.autoRot=true,5000); };
 
-      {/* ── Knots on top face ── */}
-      {/* Knot 1 — oval in top-face coordinate space */}
-      <Polygon
-        points={[
-          [knot1x - knot1r*0.7, knot1y + knot1r*0.3],
-          [knot1x,              knot1y - knot1r*0.5],
-          [knot1x + knot1r*0.7, knot1y + knot1r*0.3],
-          [knot1x,              knot1y + knot1r*0.85],
-        ].map(p=>`${p[0]},${p[1]}`).join(' ')}
-        fill={knotCol} opacity={0.55}
-      />
-      <Polygon
-        points={[
-          [knot1x - knot1r*0.35, knot1y],
-          [knot1x,               knot1y - knot1r*0.22],
-          [knot1x + knot1r*0.35, knot1y],
-          [knot1x,               knot1y + knot1r*0.4],
-        ].map(p=>`${p[0]},${p[1]}`).join(' ')}
-        fill="rgba(0,0,0,0.2)" opacity={0.5}
-      />
-      {hasKnot2 && (
-        <Polygon
-          points={[
-            [knot2x - knot2r*0.7, knot2y + knot2r*0.3],
-            [knot2x,              knot2y - knot2r*0.5],
-            [knot2x + knot2r*0.7, knot2y + knot2r*0.3],
-            [knot2x,              knot2y + knot2r*0.85],
-          ].map(p=>`${p[0]},${p[1]}`).join(' ')}
-          fill={knotCol} opacity={0.4}
-        />
-      )}
+    // ── Render loop ──────────────────────────────────────────────────────────
+    const STRIDE=10*4; // 10 floats per vertex
+    let last=0;
+    function frame(now){
+      S.animId=requestAnimationFrame(frame);
+      const dt=Math.min((now-last)/1000,0.05); last=now;
 
-      {/* ── Top surface highlight (light catches top-left) ── */}
-      <Polygon
-        points={`${tx0+1},${ty0-1} ${tx0+w*0.45},${ty0-1} ${tx0+w*0.45+ix*0.45},${ty0-iy*0.45-1} ${tx0+ix*0.45},${ty0-iy*0.45-1}`}
-        fill="rgba(255,255,255,0.14)"
-      />
+      if(S.autoRot&&!S.rotActive&&!S.pullActive) S.targetYaw+=0.008;
+      S.yaw   +=(S.targetYaw-S.yaw)*0.10;
+      S.pitch +=(S.targetPitch-S.pitch)*0.10;
 
-      {/* ── Scratch marks (random thin lines) ── */}
-      {blockRng(sl,70) > 0.4 && (
-        <Line
-          x1={x + w*(0.2+blockRng(sl,71)*0.3)} y1={y-1}
-          x2={x + w*(0.5+blockRng(sl,72)*0.3) + ix*(0.3+blockRng(sl,73)*0.4)}
-          y2={y-iy*(0.3+blockRng(sl,74)*0.4)-1}
-          stroke="rgba(0,0,0,0.07)" strokeWidth={0.5}
-        />
-      )}
+      // Build geometry
+      const blocks=blocksRef.current.flat();
+      const sel=selectedRef.current;
+      const hovSlot=S.hovSlot, selSlot=sel?sel.row*3+sel.col:-1;
 
-      {/* ── Selected gold glow ── */}
-      {isSelected && (
-        <>
-          <Polygon points={topPts}   fill="rgba(255,215,0,0.22)" />
-          <Polygon points={frontPts} fill="rgba(255,215,0,0.10)" />
-          <Polygon points={sidePts}  fill="rgba(255,215,0,0.08)" />
-        </>
-      )}
+      const allV=[],allI=[];
+      let base=0;
+      for(const b of blocks){
+        if(b.removed)continue;
+        const rotated=(b.row%2===0);
+        const step=rotated?B3D*2+B3G*2:B3W*2/3+B3G;
+        const cx=rotated?0:(b.col-1)*step*2;
+        const cz=rotated?(b.col-1)*step*2:0;
+        const cy=b.row*(B3H*2+B3G*2)+B3H;
+        const slot=b.row*3+b.col;
+        const {verts,idxs}=buildBlockGeom(cx,cy,cz,rotated,slot);
+        for(const i of idxs) allI.push(i+base);
+        allV.push(...verts);
+        base+=verts.length/10;
+      }
 
-      {/* ── Hover hint — subtle top shimmer ── */}
-      {isRemovable && !isSelected && (
-        <Polygon points={topPts} fill="rgba(255,220,140,0.10)" />
-      )}
+      gl.bindBuffer(gl.ARRAY_BUFFER,S.buf_v);
+      gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(allV),gl.DYNAMIC_DRAW);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,S.buf_i);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(allI),gl.DYNAMIC_DRAW);
 
-    </G>
-  );
-}
+      const rows=blocksRef.current.length;
+      const towerH=rows*(B3H*2+B3G*2);
+      const tgtY=towerH*0.44;
+      const dist=3.8;
+      const eye=[
+        Math.sin(S.yaw)*Math.cos(S.pitch)*dist,
+        Math.sin(S.pitch)*dist+tgtY,
+        Math.cos(S.yaw)*Math.cos(S.pitch)*dist,
+      ];
+      const asp=(gl.drawingBufferWidth||SW)/(gl.drawingBufferHeight||(SH*0.5));
+      const proj=m4persp(0.82,asp,0.05,50);
+      const view=m4lookAt(eye,[0,tgtY,0],[0,1,0]);
+      const vp=m4mul(proj,view);
 
-// ── Tower with drag-to-pull ───────────────────────────────────────────────────
-function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeAnim, levelIdx }) {
-  const rows = tower.length;
-  const svgH = rows * ROW_H + ISO_Y + 80;
-  const svgW = SW - 10;
+      gl.clearColor(0.030,0.012,0.004,1);
+      gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+      gl.viewport(0,0,gl.drawingBufferWidth,gl.drawingBufferHeight);
 
-  // Center tower — blocks are flush (GAP=0) so total width = COLS * BW
-  const towerTotalW = COLS * BW;
-  const startX = (svgW - towerTotalW - ISO_X) / 2;
+      gl.useProgram(prog);
+      gl.uniformMatrix4fv(gl.getUniformLocation(prog,'uVP'),false,vp);
+      gl.uniform1f(gl.getUniformLocation(prog,'uTilt'),tiltRef.current);
+      gl.uniform1f(gl.getUniformLocation(prog,'uShake'),shakeRef.current);
+      gl.uniform3fv(gl.getUniformLocation(prog,'uL1'),[1.2,2.8,1.8]);
+      gl.uniform3fv(gl.getUniformLocation(prog,'uL2'),[-0.8,0.6,-0.4]);
+      gl.uniform1f(gl.getUniformLocation(prog,'uHovSlot'),hovSlot);
+      gl.uniform1f(gl.getUniformLocation(prog,'uSelSlot'),selSlot);
 
-  const dragRef = useRef({ blockId: null, startX: 0, dx: 0, pulling: false });
-  const dragAnims = useRef({});
+      gl.bindBuffer(gl.ARRAY_BUFFER,S.buf_v);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,S.buf_i);
+      function ba(name,size,off){
+        const loc=gl.getAttribLocation(prog,name);
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc,size,gl.FLOAT,false,STRIDE,off*4);
+      }
+      ba('aP',3,0); ba('aN',3,3); ba('aUV',2,6); ba('aFace',1,8); ba('aSlot',1,9);
+      gl.drawElements(gl.TRIANGLES,allI.length,gl.UNSIGNED_SHORT,0);
+      gl.flush();
+      gl.endFrameEXP();
+    }
+    requestAnimationFrame(frame);
+  },[]);
 
-  const createPanResponder = useCallback((block) => {
-    if (!canRemove(block, tower)) return { panHandlers: {} };
+  // ── Touch handlers — CLEAN separation ────────────────────────────────────
+  // Single touch on a block = pull drag
+  // Single touch on empty   = rotation
+  // NEVER mix mid-gesture
 
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 4,
+  function getBlock3D(px,py){
+    const S=stateRef.current;
+    const blocks=blocksRef.current.flat();
+    const rows=blocksRef.current.length;
+    const towerH=rows*(B3H*2+B3G*2);
+    const tgtY=towerH*0.44;
+    const dist=3.8;
+    const eye=[
+      Math.sin(S.yaw)*Math.cos(S.pitch)*dist,
+      Math.sin(S.pitch)*dist+tgtY,
+      Math.cos(S.yaw)*Math.cos(S.pitch)*dist,
+    ];
+    const ndcX=(px/SW)*2-1;
+    const ndcY=-((py/(SH*0.5))*2-1);
+    const fwd=norm3(sub3([0,tgtY,0],eye));
+    const rgt=norm3(cross3(fwd,[0,1,0]));
+    const upv=cross3(rgt,fwd);
+    const asp=SW/(SH*0.5);
+    const th=Math.tan(0.82/2);
+    const dir=norm3([
+      fwd[0]+rgt[0]*ndcX*asp*th+upv[0]*ndcY*th,
+      fwd[1]+rgt[1]*ndcX*asp*th+upv[1]*ndcY*th,
+      fwd[2]+rgt[2]*ndcX*asp*th+upv[2]*ndcY*th,
+    ]);
+    // Get top row
+    const flat=blocks.filter(b=>!b.removed);
+    let topRow=0;
+    for(const b of flat) if(b.row>topRow) topRow=b.row;
 
-      onPanResponderGrant: () => {
+    let best=null,bestT=1e9;
+    for(const b of flat){
+      if(b.removed) continue;
+      if(b.row>=topRow-1) continue;
+      if(flat.filter(x=>x.row===b.row).length<2) continue;
+      const rotated=(b.row%2===0);
+      const step=rotated?B3D*2+B3G*2:B3W*2/3+B3G;
+      const cx=rotated?0:(b.col-1)*step*2;
+      const cz=rotated?(b.col-1)*step*2:0;
+      const cy=b.row*(B3H*2+B3G*2)+B3H;
+      const ex=rotated?B3W:B3D, ez=rotated?B3D:B3W;
+      const t=rayAABB(eye,dir,[cx-ex,cy-B3H,cz-ez],[cx+ex,cy+B3H,cz+ez]);
+      if(t&&t<bestT){bestT=t;best=b;}
+    }
+    return best;
+  }
+
+  const panResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: ()=>true,
+    onMoveShouldSetPanResponder: (_,g)=>Math.abs(g.dx)>3||Math.abs(g.dy)>3,
+
+    onPanResponderGrant: (e)=>{
+      const S=stateRef.current;
+      S.stopAutoRot?.();
+      const px=e.nativeEvent.locationX??e.nativeEvent.pageX;
+      const py=e.nativeEvent.locationY??e.nativeEvent.pageY;
+      const hit=getBlock3D(px,py);
+      if(hit){
+        S.pullActive=true; S.pullBlock=hit;
+        S.pullStartX=e.nativeEvent.pageX;
+        S.hovSlot=hit.row*3+hit.col;
+        setSelected(hit);
         SoundFX.select();
-        setSelected(block);
-        dragRef.current = { blockId: block.id, startX: 0, dx: 0, pulling: false };
-        if (!dragAnims.current[block.id]) {
-          dragAnims.current[block.id] = new Animated.Value(0);
-        }
-      },
+      } else {
+        S.rotActive=true;
+        S.rotStartX=e.nativeEvent.pageX;
+        S.rotStartY=e.nativeEvent.pageY;
+        S.rotYaw0=S.yaw; S.rotPitch0=S.pitch;
+      }
+    },
 
-      onPanResponderMove: (_, g) => {
-        dragRef.current.dx = g.dx;
-        const anim = dragAnims.current[block.id];
-        if (anim) anim.setValue(g.dx);
-        if (Math.abs(g.dx) > 18 && !dragRef.current.pulling) {
-          dragRef.current.pulling = true;
-          SoundFX.creak();
-        }
-      },
+    onPanResponderMove: (_,g)=>{
+      const S=stateRef.current;
+      if(S.rotActive){
+        // ONLY rotation — yaw from horizontal, pitch from vertical
+        S.targetYaw   = S.rotYaw0   + g.dx * 0.008;
+        S.targetPitch = Math.max(-0.05, Math.min(0.62,
+          S.rotPitch0 - g.dy * 0.006));
+      }
+      if(S.pullActive&&S.pullBlock){
+        // Show creak feedback
+        if(Math.abs(g.dx)>18) SoundFX.creak();
+      }
+    },
 
-      onPanResponderRelease: (_, g) => {
-        const { dx } = g;
-        const anim = dragAnims.current[block.id];
-        const threshold = BW * 0.65;
-
-        if (Math.abs(dx) >= threshold) {
-          Animated.timing(anim, {
-            toValue: dx > 0 ? SW : -SW,
-            duration: 160,
-            useNativeDriver: true,
-          }).start(() => {
-            if (anim) anim.setValue(0);
-            delete dragAnims.current[block.id];
-            onPullBlock(block, dx);
-          });
+    onPanResponderRelease: (_,g)=>{
+      const S=stateRef.current;
+      if(S.pullActive&&S.pullBlock){
+        const threshold=SW*0.20;
+        if(Math.abs(g.dx)>=threshold){
+          onPullBlock(S.pullBlock,g.dx);
         } else {
-          Animated.spring(anim, { toValue: 0, tension: 130, friction: 8, useNativeDriver: true }).start();
           SoundFX.creak();
           setSelected(null);
         }
-        dragRef.current.pulling = false;
-      },
+      }
+      S.rotActive=false; S.pullActive=false;
+      S.pullBlock=null; S.hovSlot=-1;
+      setSelected(null);
+    },
 
-      onPanResponderTerminate: () => {
-        const anim = dragAnims.current[block.id];
-        if (anim) Animated.spring(anim, { toValue: 0, tension: 130, friction: 8, useNativeDriver: true }).start();
-        setSelected(null);
-      },
-    });
-  }, [tower, setSelected, onPullBlock]);
+    onPanResponderTerminate: ()=>{
+      const S=stateRef.current;
+      S.rotActive=false; S.pullActive=false;
+      S.pullBlock=null; S.hovSlot=-1;
+      setSelected(null);
+    },
+  })).current;
 
-  const visibleBlocks = tower.flat()
-    .filter(b => !b.removed)
-    .sort((a, b) => a.row - b.row || a.col - b.col);
-
-  // Floor ellipse position
-  const floorY = svgH - 22;
-  const floorCX = startX + (COLS * BW) / 2 + ISO_X / 2;
+  useEffect(()=>()=>{
+    const S=stateRef.current;
+    if(S.animId) cancelAnimationFrame(S.animId);
+  },[]);
 
   return (
-    <Animated.View style={{
-      width: svgW,
-      height: svgH,
-      transform: [
-        { rotate: tiltAnim.interpolate({ inputRange:[-90,90], outputRange:['-90deg','90deg'] }) },
-        { translateX: shakeAnim },
-      ],
-      alignSelf: 'center',
-    }}>
-      <Svg width={svgW} height={svgH} style={StyleSheet.absoluteFill} pointerEvents="none">
-
-        {/* ── Floor shadow ellipse ── */}
-        <Polygon
-          points={`${floorCX - BW*1.4},${floorY+4} ${floorCX + BW*1.4 + ISO_X},${floorY+4} ${floorCX + BW*1.4 + ISO_X},${floorY+10} ${floorCX - BW*1.4},${floorY+10}`}
-          fill="rgba(0,0,0,0)"
-        />
-        {/* Soft elliptical ground shadow */}
-        {[0.9,0.7,0.5,0.3].map((s,i)=>(
-          <Polygon key={i}
-            points={`
-              ${floorCX - BW*1.2*s},${floorY+6}
-              ${floorCX + (BW*1.2+ISO_X)*s},${floorY+6}
-              ${floorCX + (BW*1.2+ISO_X)*s},${floorY+6+6*(1-s)}
-              ${floorCX - BW*1.2*s},${floorY+6+6*(1-s)}
-            `}
-            fill={`rgba(0,0,0,${0.06*(1-i*0.2)})`}
-          />
-        ))}
-
-        {/* ── All blocks ── */}
-        {visibleBlocks.map(block => {
-          const { row, col, wood, ox, oy } = block;
-          const isSelected = selected?.id === block.id;
-          const removable = canRemove(block, tower);
-          // Flush: no gap between blocks
-          const bx = startX + col * BW + ox;
-          const by = svgH - 22 - (row * ROW_H) - BH + oy;
-          const slot = row * COLS + col;
-
-          return (
-            <IsoBlock
-              key={block.id}
-              x={bx} y={by} w={BW} h={BH}
-              wood={wood}
-              isSelected={isSelected}
-              isRemovable={removable}
-              dimmed={selected && selected.id !== block.id && !removable}
-              slot={slot}
-            />
-          );
-        })}
-      </Svg>
-
-      {/* Drag touch layer */}
-      {visibleBlocks.map(block => {
-        const { row, col, ox, oy } = block;
-        const removable = canRemove(block, tower);
-        const bx = startX + col * BW + ox;
-        const by = svgH - 22 - (row * ROW_H) - BH + oy;
-        const panResponder = removable ? createPanResponder(block) : null;
-        const dragAnim = dragAnims.current[block.id] || new Animated.Value(0);
-
-        return (
-          <Animated.View
-            key={`touch-${block.id}`}
-            {...(panResponder ? panResponder.panHandlers : {})}
-            style={{
-              position: 'absolute',
-              left: bx,
-              top: by - ISO_Y,
-              width: BW + ISO_X,
-              height: BH + ISO_Y,
-              transform: [{ translateX: dragAnim }],
-            }}
-          />
-        );
-      })}
-    </Animated.View>
+    <View style={{ flex:1 }} {...panResponder.panHandlers}>
+      <GLView
+        style={{ flex:1 }}
+        onContextCreate={onContextCreate}
+      />
+    </View>
   );
 }
+
 
 // ── Distraction overlay ───────────────────────────────────────────────────────
 function DistractionBanner({ distraction }) {
@@ -747,20 +867,18 @@ function GameScreen({
         <View style={S.hintWrap}>
           <View style={S.hintPill}>
             <Text style={S.hintTxt}>
-              {selected ? '‹ Swipe left or right to pull ›' : '☛  Touch a block and drag sideways'}
+              {selected ? '‹ Drag left or right to pull ›' : '↻ Drag to rotate · Touch block to pull'}
             </Text>
           </View>
         </View>
 
-        {/* ── Tower Area ── */}
-        <View style={{ flex:1, overflow:'hidden' }}>
-          <ScrollView contentContainerStyle={S.towerArea} showsVerticalScrollIndicator={false}>
-            <TowerView
-              tower={tower} selected={selected} setSelected={setSelected}
-              onPullBlock={onPullBlock} tiltAnim={tiltAnim} shakeAnim={shakeAnim}
-              levelIdx={levelIdx}
-            />
-          </ScrollView>
+        {/* ── Tower Area — WebGL 3D ── */}
+        <View style={{ flex:1 }}>
+          <TowerView
+            tower={tower} selected={selected} setSelected={setSelected}
+            onPullBlock={onPullBlock} tiltAnim={tiltAnim} shakeAnim={shakeAnim}
+            levelIdx={levelIdx}
+          />
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             {scorePopups.map(p => (
               <View key={p.id} style={[StyleSheet.absoluteFill, {justifyContent:'center', alignItems:'center'}]}>
