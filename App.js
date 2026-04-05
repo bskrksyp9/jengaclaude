@@ -401,6 +401,7 @@ function MenuScreen({ onStart, unlockedLevels, highScores }) {
             <Text style={S.logo}>JENGA</Text>
             <View style={S.logoLine} />
             <Text style={S.logoSub}>DRAG TO PULL · DON'T LET IT FALL</Text>
+    <Text style={S.logoSub}>game by Claude prompted by skarabhaa</Text>
           </View>
 
           {/* Instructions */}
