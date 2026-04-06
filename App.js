@@ -14,22 +14,23 @@ const { width: SW, height: SH } = Dimensions.get('window');
 
 // ── Tower dimensions ──────────────────────────────────────────────────────────
 const COLS    = 3;
-const TOWER_W = Math.floor(SW * 0.86);
+const TOWER_W = Math.floor(SW * 0.72);   // narrower so tower fits with ISO depth
 const BW      = Math.floor(TOWER_W / 3);
-const BH      = Math.floor(BW * 0.34);
+const BH      = Math.floor(BW * 0.32);   // slightly flatter = more Jenga-like ratio
 const GAP     = 1;
 const ROW_H   = BH + GAP;
-const ISO_X   = Math.floor(BW * 0.20);
-const ISO_Y   = Math.floor(BH * 0.58);
+const ISO_X   = Math.floor(BW * 0.28);   // deeper side face = stronger 3D
+const ISO_Y   = Math.floor(BH * 0.70);   // taller top face
 
-// ── Wood palette ──────────────────────────────────────────────────────────────
+// ── Wood palette — much more varied colors so blocks look different ────────────
+// Alternates light/dark rows, gives visible contrast between layers
 const WOOD = [
-  { top:'#E2A050', side:'#7A4A12', front:'#BA7228' },
-  { top:'#D89848', side:'#724410', front:'#B06A22' },
-  { top:'#E6A454', side:'#7E4E14', front:'#BE762C' },
-  { top:'#D49440', side:'#6E420E', front:'#AC6420' },
-  { top:'#E8A658', side:'#824E14', front:'#C27830' },
-  { top:'#D29040', side:'#6C400E', front:'#AA621E' },
+  { top:'#E8A84C', side:'#7A4410', front:'#C07830' }, // warm amber
+  { top:'#C87830', side:'#5C3008', front:'#A06020' }, // dark mahogany
+  { top:'#DDA050', side:'#724010', front:'#B46828' }, // mid honey
+  { top:'#BA6C28', side:'#502C08', front:'#8E5418' }, // deep brown
+  { top:'#EAB060', side:'#844C14', front:'#C88038' }, // light pine
+  { top:'#C47428', side:'#583008', front:'#9C5C20' }, // walnut
 ];
 
 function br(slot, n) {
@@ -37,13 +38,18 @@ function br(slot, n) {
   return v - Math.floor(v);
 }
 
-// ── Levels — difficulty controls all physics multipliers ─────────────────────
+// ── Levels — difficulty multipliers ──────────────────────────────────────────
+// tiltMul:      how much each pull tilts the tower
+// stabMul:      how fast stability drains
+// collapseMul:  random collapse chance scaling
+// tiltLimit:    max tilt degrees before instant collapse
+// stabFloor:    minimum stability drain per pull (guarantees game ends)
 const LEVELS = [
-  { id:1, rows:9,  label:'Beginner',    emoji:'🪵', target:5,  timeLimit:0,   distrChance:0,   tiltMul:0.28, stabMul:0.30, collapseMul:0.20, tiltLimit:28 },
-  { id:2, rows:12, label:'Casual',      emoji:'🏗️', target:8,  timeLimit:0,   distrChance:0,   tiltMul:0.42, stabMul:0.48, collapseMul:0.35, tiltLimit:26 },
-  { id:3, rows:15, label:'Challenging', emoji:'😤', target:11, timeLimit:150, distrChance:0.25, tiltMul:0.60, stabMul:0.68, collapseMul:0.55, tiltLimit:24 },
-  { id:4, rows:18, label:'Expert',      emoji:'🔥', target:14, timeLimit:100, distrChance:0.45, tiltMul:0.80, stabMul:0.85, collapseMul:0.75, tiltLimit:22 },
-  { id:5, rows:21, label:'Master',      emoji:'💀', target:17, timeLimit:70,  distrChance:0.65, tiltMul:1.00, stabMul:1.00, collapseMul:1.00, tiltLimit:20 },
+  { id:1, rows:9,  label:'Beginner',    emoji:'🪵', target:5,  timeLimit:0,   distrChance:0,    tiltMul:0.22, stabMul:0.28, collapseMul:0.12, tiltLimit:32, stabFloor:4  },
+  { id:2, rows:12, label:'Casual',      emoji:'🏗️', target:8,  timeLimit:0,   distrChance:0,    tiltMul:0.40, stabMul:0.55, collapseMul:0.35, tiltLimit:28, stabFloor:7  },
+  { id:3, rows:15, label:'Challenging', emoji:'😤', target:11, timeLimit:150, distrChance:0.25, tiltMul:0.60, stabMul:0.72, collapseMul:0.58, tiltLimit:24, stabFloor:10 },
+  { id:4, rows:18, label:'Expert',      emoji:'🔥', target:14, timeLimit:100, distrChance:0.45, tiltMul:0.80, stabMul:0.88, collapseMul:0.78, tiltLimit:22, stabFloor:13 },
+  { id:5, rows:21, label:'Master',      emoji:'💀', target:17, timeLimit:70,  distrChance:0.65, tiltMul:1.00, stabMul:1.00, collapseMul:1.00, tiltLimit:20, stabFloor:16 },
 ];
 
 const LEVEL_ACCENT = ['#C87941','#B8682E','#A85820','#984818','#883810'];
@@ -91,7 +97,11 @@ function buildTower(rows) {
   return Array.from({length:rows},(_,r)=>
     Array.from({length:COLS},(_,c)=>({
       id:`${r}-${c}`,row:r,col:c,removed:false,
-      wood:(r*3+c)%WOOD.length,
+      // Alternate light/dark every row — strong visual layering
+      // Even rows light, odd rows dark, with slight col variation
+      wood: (r % 2 === 0)
+        ? [0, 2, 4][c % 3]   // light variants: amber, honey, pine
+        : [1, 3, 5][c % 3],  // dark variants: mahogany, brown, walnut
       ox:(Math.random()-0.5)*1.2, oy:(Math.random()-0.5)*0.6,
     }))
   );
@@ -144,17 +154,17 @@ function IsoBlock({ x, y, w, h, wood, isSelected, isRemovable, dimmed, slot }) {
   return (
     <G opacity={op}>
       {/* shadow */}
-      <Polygon points={`${x+4},${y+h+2} ${x+w+4},${y+h+2} ${x+w+ix+4},${y-iy+h+2} ${x+ix+4},${y-iy+h+2}`} fill="rgba(0,0,0,0.15)" />
+      <Polygon points={`${x+4},${y+h+2} ${x+w+4},${y+h+2} ${x+w+ix+4},${y-iy+h+2} ${x+ix+4},${y-iy+h+2}`} fill="rgba(0,0,0,0.18)" />
 
       {/* front */}
-      <Polygon points={frtPts} fill={cf} stroke={sel?'#FFD700':'rgba(0,0,0,0.48)'} strokeWidth={sel?1.8:0.5} />
+      <Polygon points={frtPts} fill={cf} stroke={sel?'#FFD700':'rgba(0,0,0,0.55)'} strokeWidth={sel?1.8:0.6} />
       {grains.map((t,i)=>(
-        <Line key={`f${i}`} x1={x+w*t} y1={y+h} x2={x+w*t+(br(sl,20+i)-0.5)*1.5} y2={y}
-          stroke={br(sl,30+i)>0.5?'rgba(0,0,0,0.09)':'rgba(255,255,255,0.05)'}
-          strokeWidth={0.5+br(sl,40+i)*0.7} />
+        <Line key={`f${i}`} x1={x+w*t} y1={y+h} x2={x+w*t+(br(sl,20+i)-0.5)*2} y2={y}
+          stroke={br(sl,30+i)>0.5?'rgba(0,0,0,0.18)':'rgba(255,255,255,0.10)'}
+          strokeWidth={0.6+br(sl,40+i)*0.9} />
       ))}
-      <Line x1={x} y1={y} x2={x} y2={y+h} stroke="rgba(255,255,255,0.08)" strokeWidth={1.5}/>
-      <Line x1={x} y1={y+h} x2={x+w} y2={y+h} stroke="rgba(0,0,0,0.26)" strokeWidth={0.8}/>
+      <Line x1={x} y1={y} x2={x} y2={y+h} stroke="rgba(255,255,255,0.12)" strokeWidth={1.8}/>
+      <Line x1={x} y1={y+h} x2={x+w} y2={y+h} stroke="rgba(0,0,0,0.35)" strokeWidth={1.0}/>
 
       {/* side */}
       <Polygon points={sidPts} fill={cs} stroke={sel?'#FFD700':'rgba(0,0,0,0.52)'} strokeWidth={sel?1.8:0.5} />
@@ -191,7 +201,7 @@ function IsoBlock({ x, y, w, h, wood, isSelected, isRemovable, dimmed, slot }) {
 }
 
 // ── Tower view ────────────────────────────────────────────────────────────────
-function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeAnim }) {
+function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeAnim, wobbleAnim, scaleAnim }) {
   const rows=tower.length, svgW=SW-8, svgH=rows*ROW_H+ISO_Y+70;
   const startX=(svgW-COLS*BW-ISO_X)/2;
   const dragRef=useRef({blockId:null,dx:0,pulling:false});
@@ -215,10 +225,16 @@ function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeA
       onPanResponderRelease:(_,g)=>{
         const anim=dragAnims.current[block.id], thr=BW*0.65;
         if(Math.abs(g.dx)>=thr){
-          Animated.timing(anim,{toValue:g.dx>0?SW:-SW,duration:160,useNativeDriver:true})
-            .start(()=>{anim?.setValue(0);delete dragAnims.current[block.id];onPullBlock(block,g.dx);});
+          // Fly out fast with slight arc
+          Animated.timing(anim,{toValue:g.dx>0?SW*1.2:-SW*1.2,duration:220,useNativeDriver:true})
+            .start(()=>{
+              anim?.setValue(0);
+              delete dragAnims.current[block.id];
+              onPullBlock(block,g.dx);
+            });
         } else {
-          Animated.spring(anim,{toValue:0,tension:130,friction:8,useNativeDriver:true}).start();
+          // Snap back with bounce
+          Animated.spring(anim,{toValue:0,tension:180,friction:7,useNativeDriver:true}).start();
           SoundFX.creak(); setSelected(null);
         }
         dragRef.current.pulling=false;
@@ -234,8 +250,11 @@ function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeA
 
   return (
     <Animated.View style={{width:svgW,height:svgH,transform:[
-      {rotate:tiltAnim.interpolate({inputRange:[-90,90],outputRange:['-90deg','90deg']})},
-      {translateX:shakeAnim}],alignSelf:'center'}}>
+      {rotate:tiltAnim.interpolate({inputRange:[-92,92],outputRange:['-92deg','92deg']})},
+      {translateX:shakeAnim},
+      {translateX:wobbleAnim},
+      {scale:scaleAnim},
+    ],alignSelf:'center',transformOrigin:'bottom'}}>
       <Svg width={svgW} height={svgH} style={StyleSheet.absoluteFill} pointerEvents="none">
         {/* floor shadow */}
         {[0.9,0.65,0.4].map((s,i)=>(
@@ -371,7 +390,7 @@ function MenuScreen({ onStart, unlockedLevels, highScores }) {
 }
 
 // ── Game screen ───────────────────────────────────────────────────────────────
-function GameScreen({ levelIdx,tower,selected,setSelected,tiltAnim,shakeAnim,removedCount,stability,score,combo,timeLeft,distraction,scorePopups,onPullBlock,onMenu,onPopupDone }) {
+function GameScreen({ levelIdx,tower,selected,setSelected,tiltAnim,shakeAnim,wobbleAnim,scaleAnim,removedCount,stability,score,combo,timeLeft,distraction,scorePopups,onPullBlock,onMenu,onPopupDone }) {
   const lvl=LEVELS[levelIdx];
   const sc=stability>60?'#4CCC6A':stability>30?'#F5C518':'#FF4444';
   const sb=stability>60?'rgba(76,204,106,0.08)':stability>30?'rgba(245,197,24,0.08)':'rgba(255,68,68,0.10)';
@@ -411,7 +430,8 @@ function GameScreen({ levelIdx,tower,selected,setSelected,tiltAnim,shakeAnim,rem
         <View style={{flex:1,overflow:'hidden'}}>
           <ScrollView contentContainerStyle={S.towerArea} showsVerticalScrollIndicator={false}>
             <TowerView tower={tower} selected={selected} setSelected={setSelected}
-              onPullBlock={onPullBlock} tiltAnim={tiltAnim} shakeAnim={shakeAnim} levelIdx={levelIdx}/>
+              onPullBlock={onPullBlock} tiltAnim={tiltAnim} shakeAnim={shakeAnim}
+              wobbleAnim={wobbleAnim} scaleAnim={scaleAnim} levelIdx={levelIdx}/>
           </ScrollView>
           <View style={StyleSheet.absoluteFill} pointerEvents="none">
             {scorePopups.map(p=>(
@@ -508,20 +528,61 @@ export default function App() {
 
   const tiltAnim=useRef(new Animated.Value(0)).current;
   const shakeAnim=useRef(new Animated.Value(0)).current;
+  const wobbleAnim=useRef(new Animated.Value(0)).current;  // continuous micro-sway
+  const scaleAnim=useRef(new Animated.Value(1)).current;   // collapse scale-down
   const tiltVal=useRef(0), timerRef=useRef(null), distrRef=useRef(null);
   const comboRef=useRef(null), gameOverRef=useRef(false);
+  const wobbleLoop=useRef(null);
 
   const cleanup=()=>{
     if(timerRef.current) clearInterval(timerRef.current);
     if(distrRef.current) clearInterval(distrRef.current);
     if(comboRef.current) clearTimeout(comboRef.current);
+    if(wobbleLoop.current) wobbleLoop.current.stop();
   };
+
+  // Start continuous micro-wobble based on stability
+  const startWobble=useCallback((stab)=>{
+    if(wobbleLoop.current) wobbleLoop.current.stop();
+    const amp = Math.max(0, (100-stab)/100) * 2.5 + 0.3; // more wobble as stability drops
+    const speed = 800 + stab * 6; // faster wobble when unstable
+    wobbleLoop.current = Animated.loop(
+      Animated.sequence([
+        Animated.timing(wobbleAnim,{toValue:amp,duration:speed,useNativeDriver:true}),
+        Animated.timing(wobbleAnim,{toValue:-amp,duration:speed,useNativeDriver:true}),
+      ])
+    );
+    wobbleLoop.current.start();
+  },[]);
 
   const triggerCollapse=useCallback((ct)=>{
     if(gameOverRef.current) return;
     gameOverRef.current=true; cleanup(); SoundFX.crash();
-    Animated.timing(tiltAnim,{toValue:ct>0?85:-85,duration:600,useNativeDriver:true}).start();
-    setWon(false); setTimeout(()=>setScreen('result'),800);
+    Vibration.vibrate([0,80,40,120,60,200,80,300]);
+
+    // Phase 1: violent shake
+    Animated.sequence([
+      Animated.timing(shakeAnim,{toValue:18,duration:60,useNativeDriver:true}),
+      Animated.timing(shakeAnim,{toValue:-22,duration:60,useNativeDriver:true}),
+      Animated.timing(shakeAnim,{toValue:16,duration:55,useNativeDriver:true}),
+      Animated.timing(shakeAnim,{toValue:-18,duration:55,useNativeDriver:true}),
+      Animated.timing(shakeAnim,{toValue:12,duration:50,useNativeDriver:true}),
+      Animated.timing(shakeAnim,{toValue:-14,duration:50,useNativeDriver:true}),
+      Animated.timing(shakeAnim,{toValue:0,duration:80,useNativeDriver:true}),
+    ]).start();
+
+    // Phase 2: tip over and shrink
+    Animated.sequence([
+      Animated.delay(180),
+      Animated.parallel([
+        Animated.timing(tiltAnim,{toValue:ct>0?92:-92,duration:700,useNativeDriver:true}),
+        Animated.timing(scaleAnim,{toValue:0.85,duration:700,useNativeDriver:true}),
+      ]),
+      Animated.timing(scaleAnim,{toValue:0,duration:300,useNativeDriver:true}),
+    ]).start();
+
+    setWon(false);
+    setTimeout(()=>setScreen('result'),1200);
   },[]);
 
   const startLevel=useCallback((idx)=>{
@@ -531,6 +592,8 @@ export default function App() {
     tiltVal.current=0; tiltAnim.setValue(0); shakeAnim.setValue(0);
     setRemovedCount(0); setStability(100); setScore(0); setCombo(1);
     setWon(false); setDistraction(null); setScorePopups([]);
+    wobbleAnim.setValue(0); scaleAnim.setValue(1);
+    startWobble(100); // start gentle wobble
     if(cfg.timeLimit>0){
       setTimeLeft(cfg.timeLimit);
       timerRef.current=setInterval(()=>{
@@ -572,45 +635,67 @@ export default function App() {
     const rowHeight=block.row/cfg.rows;
     const pulledDir=dragDx>0?1:-1;
 
-    // Tilt: scaled by level multiplier. Center blocks barely tilt, edge blocks tilt more.
-    // directionFactor removed — always pulling wrong way was way too punishing
-    const tiltDelta = (instability*6 + rowHeight*2 + 0.5) * cfg.tiltMul;
-    const noise = (Math.random()-0.5)*0.8*cfg.tiltMul;
-    const newTilt=Math.max(-cfg.tiltLimit, Math.min(cfg.tiltLimit,
-      tiltVal.current + pulledDir*tiltDelta + noise
+    // ── Tilt ─────────────────────────────────────────────────────────────────
+    // Each pull tilts based on instability + row height, scaled by level
+    const tiltDelta = (instability*5 + rowHeight*1.5 + 0.4) * cfg.tiltMul;
+    const noise     = (Math.random()-0.5) * 0.6 * cfg.tiltMul;
+    // Tower partially recenters between pulls (damping) — feels physical
+    const damped    = tiltVal.current * 0.85;
+    const newTilt   = Math.max(-cfg.tiltLimit, Math.min(cfg.tiltLimit,
+      damped + pulledDir * tiltDelta + noise
     ));
-    tiltVal.current=newTilt;
-    Animated.spring(tiltAnim,{toValue:newTilt,tension:30,friction:6,useNativeDriver:true}).start();
-    if(Math.abs(newTilt)>12) SoundFX.creak();
+    tiltVal.current = newTilt;
+    Animated.spring(tiltAnim, {toValue:newTilt, tension:32, friction:7, useNativeDriver:true}).start();
+    if (Math.abs(newTilt) > 10) SoundFX.creak();
 
-    // Stability: much gentler drain, especially on early levels
-    const tiltPenalty  = Math.pow(Math.abs(newTilt)/cfg.tiltLimit, 1.8) * 40 * cfg.stabMul;
-    const strucPenalty = instability * 14 * cfg.stabMul;
-    const rowPenalty   = rowHeight * 6 * cfg.stabMul;
-    const pullPenalty  = newCount * (18/(cfg.rows*2)) * cfg.stabMul;
-    const newStab=Math.max(0, 100 - tiltPenalty - strucPenalty - rowPenalty - pullPenalty);
+    // ── Stability ─────────────────────────────────────────────────────────────
+    // stabFloor = guaranteed minimum per pull — game always progresses toward danger
+    const tiltPenalty  = Math.pow(Math.abs(newTilt)/cfg.tiltLimit, 1.6) * 45 * cfg.stabMul;
+    const strucPenalty = instability * 18 * cfg.stabMul;
+    const rowPenalty   = rowHeight * 8 * cfg.stabMul;
+    const floorDrain   = cfg.stabFloor;
+    const totalDrain   = Math.max(floorDrain, tiltPenalty + strucPenalty + rowPenalty);
+    const newStab      = Math.max(0, stability - totalDrain);
     setStability(newStab);
-    if(newStab<25) SoundFX.danger();
+    if (newStab < 30) SoundFX.danger();
 
-    // Score
-    const isEdge=block.col!==1, isHighRow=rowHeight>0.6;
-    const pts=(isEdge?180:90)+Math.floor(rowHeight*120)+(combo>1?combo*30:0);
-    const newScore=score+pts; setScore(newScore);
+    // Shake punch on every pull — stronger for edge/high blocks
+    const shakeStrength = 4 + instability * 14 + rowHeight * 6;
+    const dir = pulledDir;
+    Animated.sequence([
+      Animated.timing(shakeAnim,{toValue:dir*shakeStrength,duration:55,useNativeDriver:true}),
+      Animated.timing(shakeAnim,{toValue:dir*-shakeStrength*0.5,duration:55,useNativeDriver:true}),
+      Animated.spring(shakeAnim,{toValue:0,tension:180,friction:6,useNativeDriver:true}),
+    ]).start();
+
+    // Update wobble intensity based on new stability
+    startWobble(newStab);
+
+    // ── Score ─────────────────────────────────────────────────────────────────
+    const isEdge   = block.col !== 1;
+    const isHighRow= rowHeight > 0.6;
+    const pts      = (isEdge?180:90) + Math.floor(rowHeight*120) + (combo>1?combo*30:0);
+    const newScore = score + pts; setScore(newScore);
     setCombo(c=>c+1);
-    if(comboRef.current) clearTimeout(comboRef.current);
-    comboRef.current=setTimeout(()=>setCombo(1),8000);
+    if (comboRef.current) clearTimeout(comboRef.current);
+    comboRef.current = setTimeout(()=>setCombo(1), 8000);
     setScorePopups(prev=>[...prev,{id:Date.now(),score:pts,color:isEdge?'#FF6B35':isHighRow?'#FFD700':'#90EE90'}]);
 
-    // Collapse: three contributing factors all scaled by level multiplier
-    // Much lower base so beginner is genuinely forgiving
-    const cp =
-      Math.pow(instability, 1.6) * 0.35 * cfg.collapseMul +
-      Math.pow(Math.abs(newTilt)/cfg.tiltLimit, 2.5) * 0.30 * cfg.collapseMul +
-      Math.pow(1 - newStab/100, 2.2) * 0.25 * cfg.collapseMul;
-
-    if(Math.random()<cp || Math.abs(newTilt)>=cfg.tiltLimit || newStab<3){
+    // ── Collapse check ────────────────────────────────────────────────────────
+    // Hard thresholds first — these ALWAYS collapse, no randomness
+    if (newStab <= 0 || Math.abs(newTilt) >= cfg.tiltLimit) {
       triggerCollapse(newTilt); return;
     }
+
+    // Soft random collapse — probability rises steeply as things get bad
+    const tiltRatio  = Math.abs(newTilt) / cfg.tiltLimit;   // 0..1
+    const stabRatio  = 1 - newStab / 100;                    // 0..1 (1 = no stability)
+    const tiltRisk   = Math.pow(tiltRatio,  1.8) * 0.55 * cfg.collapseMul;
+    const stabRisk   = Math.pow(stabRatio,  1.4) * 0.60 * cfg.collapseMul;
+    const structRisk = Math.pow(instability,1.6) * 0.30 * cfg.collapseMul;
+    const cp         = Math.min(0.95, tiltRisk + stabRisk + structRisk);
+
+    if (Math.random() < cp) { triggerCollapse(newTilt); return; }
     if(newCount>=cfg.target){
       cleanup(); SoundFX.win(); gameOverRef.current=true;
       const next=levelIdx+1;
@@ -626,7 +711,8 @@ export default function App() {
       <StatusBar style="light"/>
       {screen==='menu'&&<MenuScreen onStart={startLevel} unlockedLevels={unlockedLevels} highScores={highScores}/>}
       {screen==='game'&&<GameScreen levelIdx={levelIdx} tower={tower} selected={selected} setSelected={setSelected}
-        tiltAnim={tiltAnim} shakeAnim={shakeAnim} removedCount={removedCount} stability={stability}
+        tiltAnim={tiltAnim} shakeAnim={shakeAnim} wobbleAnim={wobbleAnim} scaleAnim={scaleAnim}
+        removedCount={removedCount} stability={stability}
         score={score} combo={combo} timeLeft={timeLeft} distraction={distraction} scorePopups={scorePopups}
         onPullBlock={handlePullBlock} onMenu={()=>{cleanup();gameOverRef.current=true;setScreen('menu');}}
         onPopupDone={(id)=>setScorePopups(prev=>prev.filter(p=>p.id!==id))}/>}
