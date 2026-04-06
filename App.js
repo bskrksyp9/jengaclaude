@@ -37,13 +37,13 @@ function br(slot, n) {
   return v - Math.floor(v);
 }
 
-// ── Levels ────────────────────────────────────────────────────────────────────
+// ── Levels — difficulty controls all physics multipliers ─────────────────────
 const LEVELS = [
-  { id:1, rows:9,  label:'Beginner',    emoji:'🪵', target:5,  timeLimit:0,   distrChance:0   },
-  { id:2, rows:12, label:'Casual',      emoji:'🏗️', target:8,  timeLimit:0,   distrChance:0   },
-  { id:3, rows:15, label:'Challenging', emoji:'😤', target:11, timeLimit:120, distrChance:0.3 },
-  { id:4, rows:18, label:'Expert',      emoji:'🔥', target:14, timeLimit:90,  distrChance:0.5 },
-  { id:5, rows:21, label:'Master',      emoji:'💀', target:17, timeLimit:60,  distrChance:0.7 },
+  { id:1, rows:9,  label:'Beginner',    emoji:'🪵', target:5,  timeLimit:0,   distrChance:0,   tiltMul:0.28, stabMul:0.30, collapseMul:0.20, tiltLimit:28 },
+  { id:2, rows:12, label:'Casual',      emoji:'🏗️', target:8,  timeLimit:0,   distrChance:0,   tiltMul:0.42, stabMul:0.48, collapseMul:0.35, tiltLimit:26 },
+  { id:3, rows:15, label:'Challenging', emoji:'😤', target:11, timeLimit:150, distrChance:0.25, tiltMul:0.60, stabMul:0.68, collapseMul:0.55, tiltLimit:24 },
+  { id:4, rows:18, label:'Expert',      emoji:'🔥', target:14, timeLimit:100, distrChance:0.45, tiltMul:0.80, stabMul:0.85, collapseMul:0.75, tiltLimit:22 },
+  { id:5, rows:21, label:'Master',      emoji:'💀', target:17, timeLimit:70,  distrChance:0.65, tiltMul:1.00, stabMul:1.00, collapseMul:1.00, tiltLimit:20 },
 ];
 
 const LEVEL_ACCENT = ['#C87941','#B8682E','#A85820','#984818','#883810'];
@@ -109,10 +109,14 @@ function getInstabilityScore(block, tower) {
   const remaining = tower[block.row].filter(b=>!b.removed&&b.id!==block.id);
   let unsupported = 0;
   for (const ar of tower.slice(block.row+1)) unsupported += ar.filter(b=>!b.removed).length;
-  if (remaining.length===1 && block.col===1) return 0.85;
-  if (remaining.length===1) return 0.6;
-  if (block.col===1 && remaining.length===2) return 0.1;
-  return 0.35 + (unsupported/(tower.length*3))*0.2;
+  // Last block in a row — pulling middle col is worst case
+  if (remaining.length===1 && block.col===1) return 0.70;
+  // Last edge block in a row
+  if (remaining.length===1) return 0.45;
+  // Safe center block, 2 others still present
+  if (block.col===1 && remaining.length===2) return 0.05;
+  // Edge block, 2 others still present — slightly risky
+  return 0.18 + (unsupported/(tower.length*3))*0.12;
 }
 
 // ── Block renderer ────────────────────────────────────────────────────────────
@@ -563,18 +567,32 @@ export default function App() {
     const newTower=tower.map(row=>row.map(b=>b.id===block.id?{...b,removed:true}:b));
     setTower(newTower);
     const newCount=removedCount+1; setRemovedCount(newCount);
+
     const instability=getInstabilityScore(block,tower);
     const rowHeight=block.row/cfg.rows;
-    const naturalDir=block.col===0?-1:block.col===2?1:0;
     const pulledDir=dragDx>0?1:-1;
-    const dirFactor=naturalDir!==0&&pulledDir===naturalDir?1.8:1.0;
-    const newTilt=Math.max(-22,Math.min(22,tiltVal.current+pulledDir*(instability*8+rowHeight*4+1)*dirFactor+(Math.random()-0.5)*2));
+
+    // Tilt: scaled by level multiplier. Center blocks barely tilt, edge blocks tilt more.
+    // directionFactor removed — always pulling wrong way was way too punishing
+    const tiltDelta = (instability*6 + rowHeight*2 + 0.5) * cfg.tiltMul;
+    const noise = (Math.random()-0.5)*0.8*cfg.tiltMul;
+    const newTilt=Math.max(-cfg.tiltLimit, Math.min(cfg.tiltLimit,
+      tiltVal.current + pulledDir*tiltDelta + noise
+    ));
     tiltVal.current=newTilt;
     Animated.spring(tiltAnim,{toValue:newTilt,tension:30,friction:6,useNativeDriver:true}).start();
-    if(Math.abs(newTilt)>10) SoundFX.creak();
-    const newStab=Math.max(0,100-Math.pow(Math.abs(newTilt)/22,1.6)*55-instability*25-rowHeight*15-newCount*(40/(cfg.rows*2)));
+    if(Math.abs(newTilt)>12) SoundFX.creak();
+
+    // Stability: much gentler drain, especially on early levels
+    const tiltPenalty  = Math.pow(Math.abs(newTilt)/cfg.tiltLimit, 1.8) * 40 * cfg.stabMul;
+    const strucPenalty = instability * 14 * cfg.stabMul;
+    const rowPenalty   = rowHeight * 6 * cfg.stabMul;
+    const pullPenalty  = newCount * (18/(cfg.rows*2)) * cfg.stabMul;
+    const newStab=Math.max(0, 100 - tiltPenalty - strucPenalty - rowPenalty - pullPenalty);
     setStability(newStab);
-    if(newStab<30) SoundFX.danger();
+    if(newStab<25) SoundFX.danger();
+
+    // Score
     const isEdge=block.col!==1, isHighRow=rowHeight>0.6;
     const pts=(isEdge?180:90)+Math.floor(rowHeight*120)+(combo>1?combo*30:0);
     const newScore=score+pts; setScore(newScore);
@@ -582,8 +600,17 @@ export default function App() {
     if(comboRef.current) clearTimeout(comboRef.current);
     comboRef.current=setTimeout(()=>setCombo(1),8000);
     setScorePopups(prev=>[...prev,{id:Date.now(),score:pts,color:isEdge?'#FF6B35':isHighRow?'#FFD700':'#90EE90'}]);
-    const cp=Math.pow(instability,1.4)*0.7+Math.pow(Math.abs(newTilt)/22,2.0)*0.5+Math.pow(1-newStab/100,2.0)*0.4;
-    if(Math.random()<cp||Math.abs(newTilt)>20||newStab<5){triggerCollapse(newTilt);return;}
+
+    // Collapse: three contributing factors all scaled by level multiplier
+    // Much lower base so beginner is genuinely forgiving
+    const cp =
+      Math.pow(instability, 1.6) * 0.35 * cfg.collapseMul +
+      Math.pow(Math.abs(newTilt)/cfg.tiltLimit, 2.5) * 0.30 * cfg.collapseMul +
+      Math.pow(1 - newStab/100, 2.2) * 0.25 * cfg.collapseMul;
+
+    if(Math.random()<cp || Math.abs(newTilt)>=cfg.tiltLimit || newStab<3){
+      triggerCollapse(newTilt); return;
+    }
     if(newCount>=cfg.target){
       cleanup(); SoundFX.win(); gameOverRef.current=true;
       const next=levelIdx+1;
