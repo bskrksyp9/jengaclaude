@@ -129,157 +129,252 @@ function getInstabilityScore(block, tower) {
   return 0.18 + (unsupported/(tower.length*3))*0.12;
 }
 
-// ── Block renderer ────────────────────────────────────────────────────────────
-function IsoBlock({ x, y, w, h, wood, isSelected, isRemovable, dimmed, slot }) {
+// ── Block renderer — two orientations ────────────────────────────────────────
+// horizontal (even rows): long face visible at front, short depth on side
+// vertical   (odd rows):  short face visible at front, long depth on side → looks rotated 90°
+function IsoBlock({ x, y, wood, isSelected, isRemovable, dimmed, slot, horizontal }) {
   const { top:ct, side:cs, front:cf } = WOOD[wood];
-  const ix=ISO_X, iy=ISO_Y, sl=slot||0;
+  const sl = slot || 0;
 
-  // Per-corner warp
-  const wp=h*0.07;
+  // Real Jenga: block is 3× longer than wide
+  // horizontal row: full BW wide, shallow ISO depth
+  // vertical row:   1/3 BW wide (short end), deep ISO depth (3× longer into screen)
+  const fw  = horizontal ? BW      : Math.floor(BW * 0.34);  // face width
+  const fix = horizontal ? ISO_X   : Math.floor(ISO_X * 2.8); // side depth
+  const fiy = horizontal ? ISO_Y   : Math.floor(ISO_Y * 0.38);// top height
+  const h   = BH;
+
+  // Per-corner warp for uneven surface
+  const wp = h * 0.06;
   const w00=(br(sl,0)-0.5)*wp, w10=(br(sl,1)-0.5)*wp;
   const w01=(br(sl,2)-0.5)*wp, w11=(br(sl,3)-0.5)*wp;
 
-  const tx0=x,     ty0=y+w00;
-  const tx1=x+w,   ty1=y+w10;
-  const tx2=x+w+ix,ty2=y-iy+w11;
-  const tx3=x+ix,  ty3=y-iy+w01;
+  const tx0=x,      ty0=y+w00;
+  const tx1=x+fw,   ty1=y+w10;
+  const tx2=x+fw+fix,ty2=y-fiy+w11;
+  const tx3=x+fix,  ty3=y-fiy+w01;
 
-  const topPts  =`${tx0},${ty0} ${tx1},${ty1} ${tx2},${ty2} ${tx3},${ty3}`;
-  const frtPts  =`${tx0},${ty0} ${tx1},${ty1} ${x+w},${y+h} ${x},${y+h}`;
-  const sidPts  =`${tx1},${ty1} ${tx2},${ty2} ${x+w+ix},${y-iy+h} ${x+w},${y+h}`;
-  const op      = dimmed ? 0.32 : 1;
-  const sel     = isSelected;
-  const grains  = [0.16,0.31,0.50,0.68,0.83];
+  const topPts =`${tx0},${ty0} ${tx1},${ty1} ${tx2},${ty2} ${tx3},${ty3}`;
+  const frtPts =`${tx0},${ty0} ${tx1},${ty1} ${x+fw},${y+h} ${x},${y+h}`;
+  const sidPts =`${tx1},${ty1} ${tx2},${ty2} ${x+fw+fix},${y-fiy+h} ${x+fw},${y+h}`;
+
+  const op  = dimmed ? 0.30 : 1;
+  const sel = isSelected;
+
+  // Grain lines — more on horizontal (long face), fewer on vertical (short face)
+  const grainTs = horizontal ? [0.18,0.34,0.52,0.68,0.84] : [0.35, 0.65];
+
+  // Side face color — vertical rows show more depth so darken more
+  const sideOverlay = horizontal ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.04)';
 
   return (
     <G opacity={op}>
-      {/* shadow */}
-      <Polygon points={`${x+4},${y+h+2} ${x+w+4},${y+h+2} ${x+w+ix+4},${y-iy+h+2} ${x+ix+4},${y-iy+h+2}`} fill="rgba(0,0,0,0.18)" />
+      {/* Drop shadow */}
+      <Polygon
+        points={`${x+3},${y+h+2} ${x+fw+3},${y+h+2} ${x+fw+fix+3},${y-fiy+h+2} ${x+fix+3},${y-fiy+h+2}`}
+        fill="rgba(0,0,0,0.16)"
+      />
 
-      {/* front */}
-      <Polygon points={frtPts} fill={cf} stroke={sel?'#FFD700':'rgba(0,0,0,0.55)'} strokeWidth={sel?1.8:0.6} />
-      {grains.map((t,i)=>(
-        <Line key={`f${i}`} x1={x+w*t} y1={y+h} x2={x+w*t+(br(sl,20+i)-0.5)*2} y2={y}
-          stroke={br(sl,30+i)>0.5?'rgba(0,0,0,0.18)':'rgba(255,255,255,0.10)'}
-          strokeWidth={0.6+br(sl,40+i)*0.9} />
+      {/* Front face */}
+      <Polygon points={frtPts} fill={cf}
+        stroke={sel?'#FFD700':'rgba(0,0,0,0.52)'} strokeWidth={sel?2:0.6}/>
+      {grainTs.map((t,i)=>(
+        <Line key={`f${i}`}
+          x1={x+fw*t} y1={y+h}
+          x2={x+fw*t+(br(sl,20+i)-0.5)*1.8} y2={y}
+          stroke={br(sl,30+i)>0.5?'rgba(0,0,0,0.16)':'rgba(255,255,255,0.09)'}
+          strokeWidth={0.5+br(sl,40+i)*0.8}/>
       ))}
-      <Line x1={x} y1={y} x2={x} y2={y+h} stroke="rgba(255,255,255,0.12)" strokeWidth={1.8}/>
-      <Line x1={x} y1={y+h} x2={x+w} y2={y+h} stroke="rgba(0,0,0,0.35)" strokeWidth={1.0}/>
+      <Line x1={x} y1={y} x2={x} y2={y+h} stroke="rgba(255,255,255,0.11)" strokeWidth={1.6}/>
+      <Line x1={x} y1={y+h} x2={x+fw} y2={y+h} stroke="rgba(0,0,0,0.32)" strokeWidth={0.9}/>
 
-      {/* side */}
-      <Polygon points={sidPts} fill={cs} stroke={sel?'#FFD700':'rgba(0,0,0,0.52)'} strokeWidth={sel?1.8:0.5} />
-      <Polygon points={sidPts} fill="rgba(0,0,0,0.09)" />
+      {/* Side face */}
+      <Polygon points={sidPts} fill={cs}
+        stroke={sel?'#FFD700':'rgba(0,0,0,0.50)'} strokeWidth={sel?2:0.5}/>
+      <Polygon points={sidPts} fill={sideOverlay}/>
+      {/* Side grain — runs along the depth */}
+      {[0.3,0.6].map((t,i)=>(
+        <Line key={`s${i}`}
+          x1={x+fw+fix*t} y1={y-fiy*t}
+          x2={x+fw+fix*t} y2={y-fiy*t+h}
+          stroke="rgba(0,0,0,0.07)" strokeWidth={0.5}/>
+      ))}
 
-      {/* top */}
-      <Polygon points={topPts} fill={ct} stroke={sel?'#FFD700':'rgba(0,0,0,0.16)'} strokeWidth={sel?1.8:0.4} />
-      {grains.map((t,i)=>(
+      {/* Top face */}
+      <Polygon points={topPts} fill={ct}
+        stroke={sel?'#FFD700':'rgba(0,0,0,0.18)'} strokeWidth={sel?2:0.4}/>
+      {/* Top grain along long axis */}
+      {grainTs.map((t,i)=>(
         <Line key={`t${i}`}
-          x1={x+w*t} y1={y+w00+(w10-w00)*t}
-          x2={x+w*t+ix} y2={y+w00+(w10-w00)*t-iy}
-          stroke={br(sl,50+i)>0.5?'rgba(0,0,0,0.09)':'rgba(255,255,255,0.06)'}
-          strokeWidth={0.5+br(sl,60+i)*0.5} />
+          x1={x+fw*t}    y1={y+w00+(w10-w00)*t}
+          x2={x+fw*t+fix} y2={y+w00+(w10-w00)*t-fiy}
+          stroke={br(sl,50+i)>0.5?'rgba(0,0,0,0.12)':'rgba(255,255,255,0.08)'}
+          strokeWidth={0.5+br(sl,60+i)*0.5}/>
       ))}
-      {/* top highlight */}
-      <Polygon points={`${tx0+1},${ty0-1} ${tx0+w*0.4},${ty0-1} ${tx0+w*0.4+ix*0.4},${ty0-iy*0.4-1} ${tx0+ix*0.4},${ty0-iy*0.4-1}`} fill="rgba(255,255,255,0.12)" />
+      {/* Top highlight */}
+      <Polygon
+        points={`${tx0+1},${ty0-1} ${tx0+fw*0.38},${ty0-1} ${tx0+fw*0.38+fix*0.38},${ty0-fiy*0.38-1} ${tx0+fix*0.38},${ty0-fiy*0.38-1}`}
+        fill="rgba(255,255,255,0.15)"
+      />
 
-      {/* knot */}
+      {/* Knot on top face */}
       {(()=>{
-        const kx=x+w*(0.15+br(sl,70)*0.65)+ix*(0.15+br(sl,71)*0.35);
-        const ky=y-iy*(0.2+br(sl,72)*0.55)+(br(sl,73)-0.3)*h*0.4;
-        const kr=h*(0.18+br(sl,74)*0.16);
-        return(<>
-          <Polygon points={`${kx-kr*0.8},${ky} ${kx},${ky-kr*0.5} ${kx+kr*0.8},${ky} ${kx},${ky+kr*0.8}`} fill={cs} opacity={0.55}/>
-          <Polygon points={`${kx-kr*0.4},${ky} ${kx},${ky-kr*0.25} ${kx+kr*0.4},${ky} ${kx},${ky+kr*0.4}`} fill="rgba(0,0,0,0.18)" opacity={0.55}/>
-          {br(sl,75)>0.5&&<Polygon points={`${kx+w*0.28-kr*0.6},${ky-iy*0.2} ${kx+w*0.28},${ky-iy*0.2-kr*0.4} ${kx+w*0.28+kr*0.6},${ky-iy*0.2} ${kx+w*0.28},${ky-iy*0.2+kr*0.6}`} fill={cs} opacity={0.35}/>}
+        const kx = x + fw*(0.15+br(sl,70)*0.65) + fix*(0.12+br(sl,71)*0.3);
+        const ky = y - fiy*(0.2+br(sl,72)*0.5) + (br(sl,73)-0.3)*h*0.35;
+        const kr = h*(0.22+br(sl,74)*0.14);
+        return (<>
+          <Polygon points={`${kx-kr*0.85},${ky} ${kx},${ky-kr*0.5} ${kx+kr*0.85},${ky} ${kx},${ky+kr*0.85}`}
+            fill={cs} opacity={0.70}/>
+          <Polygon points={`${kx-kr*0.4},${ky} ${kx},${ky-kr*0.22} ${kx+kr*0.4},${ky} ${kx},${ky+kr*0.4}`}
+            fill="rgba(0,0,0,0.22)" opacity={0.65}/>
+          {br(sl,75)>0.45 && (
+            <Polygon
+              points={`${kx+fw*0.3-kr*0.6},${ky-fiy*0.18} ${kx+fw*0.3},${ky-fiy*0.18-kr*0.38} ${kx+fw*0.3+kr*0.6},${ky-fiy*0.18} ${kx+fw*0.3},${ky-fiy*0.18+kr*0.6}`}
+              fill={cs} opacity={0.38}/>
+          )}
         </>);
       })()}
 
-      {sel&&<><Polygon points={topPts} fill="rgba(255,215,0,0.20)"/><Polygon points={frtPts} fill="rgba(255,215,0,0.08)"/><Polygon points={sidPts} fill="rgba(255,215,0,0.06)"/></>}
-      {isRemovable&&!sel&&<Polygon points={topPts} fill="rgba(255,220,130,0.08)"/>}
+      {/* Selected glow */}
+      {sel && <>
+        <Polygon points={topPts} fill="rgba(255,215,0,0.22)"/>
+        <Polygon points={frtPts} fill="rgba(255,215,0,0.09)"/>
+        <Polygon points={sidPts} fill="rgba(255,215,0,0.07)"/>
+      </>}
+      {/* Removable shimmer */}
+      {isRemovable && !sel &&
+        <Polygon points={topPts} fill="rgba(255,220,130,0.09)"/>
+      }
     </G>
   );
 }
 
 // ── Tower view ────────────────────────────────────────────────────────────────
 function TowerView({ tower, selected, setSelected, onPullBlock, tiltAnim, shakeAnim, wobbleAnim, scaleAnim }) {
-  const rows=tower.length, svgW=SW-8, svgH=rows*ROW_H+ISO_Y+70;
-  const startX=(svgW-COLS*BW-ISO_X)/2;
-  const dragRef=useRef({blockId:null,dx:0,pulling:false});
-  const dragAnims=useRef({});
+  const rows  = tower.length;
+  const svgW  = SW - 8;
+  const svgH  = rows * ROW_H + ISO_Y * 1.5 + 50;
 
-  const createPR=useCallback((block)=>{
-    if(!canRemove(block,tower)) return {panHandlers:{}};
+  // Center the tower accounting for the wider vertical-row ISO depth
+  const maxISO_X = Math.floor(ISO_X * 2.8);
+  const startX   = (svgW - COLS * BW - maxISO_X) / 2;
+
+  const dragRef   = useRef({blockId:null,dx:0,pulling:false});
+  const dragAnims = useRef({});
+
+  const createPR = useCallback((block) => {
+    if (!canRemove(block,tower)) return {panHandlers:{}};
     return PanResponder.create({
-      onStartShouldSetPanResponder:()=>true,
-      onMoveShouldSetPanResponder:(_,g)=>Math.abs(g.dx)>4,
-      onPanResponderGrant:()=>{
+      onStartShouldSetPanResponder: ()=>true,
+      onMoveShouldSetPanResponder:  (_,g)=>Math.abs(g.dx)>4,
+      onPanResponderGrant: ()=>{
         SoundFX.select(); setSelected(block);
-        dragRef.current={blockId:block.id,dx:0,pulling:false};
-        if(!dragAnims.current[block.id]) dragAnims.current[block.id]=new Animated.Value(0);
+        dragRef.current = {blockId:block.id,dx:0,pulling:false};
+        if (!dragAnims.current[block.id])
+          dragAnims.current[block.id] = new Animated.Value(0);
       },
-      onPanResponderMove:(_,g)=>{
-        dragRef.current.dx=g.dx;
+      onPanResponderMove: (_,g)=>{
+        dragRef.current.dx = g.dx;
         dragAnims.current[block.id]?.setValue(g.dx);
-        if(Math.abs(g.dx)>18&&!dragRef.current.pulling){dragRef.current.pulling=true;SoundFX.creak();}
+        if (Math.abs(g.dx)>18 && !dragRef.current.pulling) {
+          dragRef.current.pulling = true; SoundFX.creak();
+        }
       },
-      onPanResponderRelease:(_,g)=>{
-        const anim=dragAnims.current[block.id], thr=BW*0.65;
-        if(Math.abs(g.dx)>=thr){
-          // Fly out fast with slight arc
-          Animated.timing(anim,{toValue:g.dx>0?SW*1.2:-SW*1.2,duration:220,useNativeDriver:true})
-            .start(()=>{
-              anim?.setValue(0);
-              delete dragAnims.current[block.id];
-              onPullBlock(block,g.dx);
-            });
+      onPanResponderRelease: (_,g)=>{
+        const anim = dragAnims.current[block.id];
+        const thr  = BW * 0.55; // slightly easier threshold
+        if (Math.abs(g.dx) >= thr) {
+          Animated.timing(anim,{toValue:g.dx>0?SW*1.3:-SW*1.3,duration:200,useNativeDriver:true})
+            .start(()=>{ anim?.setValue(0); delete dragAnims.current[block.id]; onPullBlock(block,g.dx); });
         } else {
-          // Snap back with bounce
-          Animated.spring(anim,{toValue:0,tension:180,friction:7,useNativeDriver:true}).start();
+          Animated.spring(anim,{toValue:0,tension:200,friction:7,useNativeDriver:true}).start();
           SoundFX.creak(); setSelected(null);
         }
-        dragRef.current.pulling=false;
+        dragRef.current.pulling = false;
       },
-      onPanResponderTerminate:()=>{
-        Animated.spring(dragAnims.current[block.id],{toValue:0,tension:130,friction:8,useNativeDriver:true}).start();
+      onPanResponderTerminate: ()=>{
+        Animated.spring(dragAnims.current[block.id],{toValue:0,tension:200,friction:7,useNativeDriver:true}).start();
         setSelected(null);
       },
     });
-  },[tower,setSelected,onPullBlock]);
+  }, [tower,setSelected,onPullBlock]);
 
-  const visible=tower.flat().filter(b=>!b.removed).sort((a,b)=>a.row-b.row||a.col-b.col);
+  const visible = tower.flat().filter(b=>!b.removed).sort((a,b)=>a.row-b.row||a.col-b.col);
 
   return (
-    <Animated.View style={{width:svgW,height:svgH,transform:[
-      {rotate:tiltAnim.interpolate({inputRange:[-92,92],outputRange:['-92deg','92deg']})},
-      {translateX:shakeAnim},
-      {translateX:wobbleAnim},
-      {scale:scaleAnim},
-    ],alignSelf:'center',transformOrigin:'bottom'}}>
+    <Animated.View style={{
+      width:svgW, height:svgH,
+      transform:[
+        {rotate: tiltAnim.interpolate({inputRange:[-92,92],outputRange:['-92deg','92deg']})},
+        {translateX: shakeAnim},
+        {translateX: wobbleAnim},
+        {scale: scaleAnim},
+      ],
+      alignSelf:'center',
+    }}>
       <Svg width={svgW} height={svgH} style={StyleSheet.absoluteFill} pointerEvents="none">
-        {/* floor shadow */}
-        {[0.9,0.65,0.4].map((s,i)=>(
-          <Polygon key={i}
-            points={`${startX+BW*0.1*(1-s)},${svgH-20+i*2} ${startX+COLS*BW+ISO_X-BW*0.1*(1-s)},${svgH-20+i*2} ${startX+COLS*BW+ISO_X-BW*0.1*(1-s)},${svgH-18+i*2} ${startX+BW*0.1*(1-s)},${svgH-18+i*2}`}
-            fill={`rgba(0,0,0,${0.07*s})`}/>
-        ))}
-        {visible.map(block=>{
-          const {row,col,wood,ox,oy}=block;
-          const bx=startX+col*BW+ox, by=svgH-22-row*ROW_H-BH+oy, slot=row*COLS+col;
-          return(
-            <IsoBlock key={block.id} x={bx} y={by} w={BW} h={BH} wood={wood}
-              isSelected={selected?.id===block.id} isRemovable={canRemove(block,tower)}
-              dimmed={!!selected&&selected.id!==block.id&&!canRemove(block,tower)} slot={slot}/>
+
+        {/* Floor shadow */}
+        <Polygon
+          points={`${startX+10},${svgH-18} ${startX+COLS*BW+maxISO_X-10},${svgH-18} ${startX+COLS*BW+maxISO_X-10},${svgH-14} ${startX+10},${svgH-14}`}
+          fill="rgba(0,0,0,0.22)"
+        />
+
+        {/* All blocks */}
+        {visible.map(block => {
+          const {row, col, wood, ox, oy} = block;
+          const horizontal = (row % 2 === 0);
+
+          // Horizontal rows: 3 blocks side by side spanning full width
+          // Vertical rows: 3 blocks side by side but each block is narrow (short end forward)
+          const blockW = horizontal ? BW : Math.floor(BW * 0.34);
+          // For vertical rows, space the 3 blocks across the same total width
+          const totalRowW = COLS * BW; // always same total footprint
+          const blockSpacing = horizontal ? BW : (totalRowW - blockW) / (COLS - 1);
+          const bx = startX + col * blockSpacing + ox;
+          const by = svgH - 18 - row * ROW_H - BH + oy;
+          const slot = row * COLS + col;
+
+          return (
+            <IsoBlock
+              key={block.id}
+              x={bx} y={by}
+              wood={wood}
+              isSelected={selected?.id===block.id}
+              isRemovable={canRemove(block,tower)}
+              dimmed={!!selected && selected.id!==block.id && !canRemove(block,tower)}
+              slot={slot}
+              horizontal={horizontal}
+            />
           );
         })}
       </Svg>
-      {visible.map(block=>{
-        const {col,row,ox,oy}=block;
-        const bx=startX+col*BW+ox, by=svgH-22-row*ROW_H-BH+oy;
-        const pr=canRemove(block,tower)?createPR(block):null;
-        const anim=dragAnims.current[block.id]||new Animated.Value(0);
-        return(
-          <Animated.View key={`t-${block.id}`} {...(pr?pr.panHandlers:{})}
-            style={{position:'absolute',left:bx,top:by-ISO_Y,width:BW+ISO_X,height:BH+ISO_Y,transform:[{translateX:anim}]}}/>
+
+      {/* Touch layer */}
+      {visible.map(block => {
+        const {col, row, ox, oy} = block;
+        const horizontal = (row % 2 === 0);
+        const blockW = horizontal ? BW : Math.floor(BW * 0.34);
+        const totalRowW = COLS * BW;
+        const blockSpacing = horizontal ? BW : (totalRowW - blockW) / (COLS - 1);
+        const fix = horizontal ? ISO_X : Math.floor(ISO_X * 2.8);
+        const fiy = horizontal ? ISO_Y : Math.floor(ISO_Y * 0.38);
+        const bx  = startX + col * blockSpacing + ox;
+        const by  = svgH - 18 - row * ROW_H - BH + oy;
+        const pr  = canRemove(block,tower) ? createPR(block) : null;
+        const anim = dragAnims.current[block.id] || new Animated.Value(0);
+
+        return (
+          <Animated.View
+            key={`t-${block.id}`}
+            {...(pr ? pr.panHandlers : {})}
+            style={{
+              position:'absolute',
+              left:bx, top:by-fiy,
+              width:blockW+fix, height:BH+fiy,
+              transform:[{translateX:anim}],
+            }}
+          />
         );
       })}
     </Animated.View>
